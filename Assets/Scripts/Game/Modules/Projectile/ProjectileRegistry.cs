@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -7,47 +8,53 @@ using UnityEditor;
 [CreateAssetMenu(menuName = "FPS Sample/Projectile/ProjectileRegistry", fileName = "ProjectileRegistry")]
 public class ProjectileRegistry : RegistryBase
 {
-    [System.Serializable]
-    public struct Entry
+    [Serializable]
+    public class Entry
     {
+        public WeakAssetReference assetGuid;
         public ProjectileTypeDefinition definition;
     }
 
-    public Entry[] entries;
+    public List<Entry> entries = new List<Entry>();
 
-    public int GetIndexByRegistryId(uint registryId)
+    public int FindIndex(WeakAssetReference guid)
     {
-        return (int)registryId -1;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].assetGuid.Equals(guid))
+                return i;
+        }
+
+        return -1;
     }
-
-
+    
 #if UNITY_EDITOR
-    public override void UpdateRegistry(bool dry)
+
+    
+    public override void PrepareForBuild()
     {
-        List<Entry> newEntries = new List<Entry>();
-        var guids = AssetDatabase.FindAssets("t:" + typeof(ProjectileTypeDefinition).Name);
+        Debug.Log("ProjectileRegistry"); 
+
+        entries.Clear();
+        var guids = AssetDatabase.FindAssets("t:ProjectileTypeDefinition");
         foreach (var guid in guids)
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (dry) Debug.Log("  Adding " + path);
-            var asset = AssetDatabase.LoadAssetAtPath(path, typeof(ProjectileTypeDefinition));
-            var definition = asset as ProjectileTypeDefinition;
-
-            Entry entry = new Entry();
-            entry.definition = definition;
-            newEntries.Add(entry);
-
-            var registryId = (uint)newEntries.Count;
-            if (definition.registryId != registryId)
+            var definition = AssetDatabase.LoadAssetAtPath<ProjectileTypeDefinition>(path);
+            
+            definition.SetAssetGUID(guid);
+            
+            Debug.Log("   Adding definition:" + definition);
+            entries.Add(new Entry
             {
-                definition.registryId = registryId;
-                EditorUtility.SetDirty(definition);
-            } 
+                definition =  definition,
+                assetGuid = definition.guid,
+            });
         }
-        if(!dry) 
-            entries = newEntries.ToArray();
+        
         EditorUtility.SetDirty(this);
     }
+    
     public override void GetSingleAssetGUIDs(List<string> guids, bool serverBuild)
     {
         if (serverBuild)
@@ -55,8 +62,8 @@ public class ProjectileRegistry : RegistryBase
         
         foreach (var entry in entries)
         {
-            if (entry.definition.clientProjectilePrefab != null)
-                guids.Add(entry.definition.clientProjectilePrefab.guid);
+            if (entry.definition.clientProjectilePrefab.IsSet())
+                guids.Add(entry.definition.clientProjectilePrefab.GetGuidStr());
         }
     }
 #endif

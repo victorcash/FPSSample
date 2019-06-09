@@ -9,19 +9,19 @@ namespace UnityEngine.Ucg.Matchmaking
     {
         internal string Url { get; }
 
-        const string k_CreateRequestEndpoint = "/mmrequest";
+        const string k_CreateRequestEndpoint = "/request";
 
-        const string k_GetAssignmentEndpoint = "/mmassigment";
+        const string k_GetAssignmentEndpoint = "/assignment";
 
         const string k_ApiVersion = "1";
 
         internal MatchmakingClient(string endpoint)
         {
-            Url = "http://" + endpoint + "/v" + k_ApiVersion;
+            Url = "https://" + endpoint + "/api/v" + k_ApiVersion + "/matchmaking";
         }
 
         /// <summary>
-        /// Start matchmaking for a provided request. This tells your matchmaking endpoint to add 
+        /// Start matchmaking for a provided request. This tells your matchmaking endpoint to add
         /// the players and group data in the request to the matchmaking pool for consideration
         /// </summary>
         /// <param name="request">The matchmaking request</param>
@@ -52,7 +52,7 @@ namespace UnityEngine.Ucg.Matchmaking
         internal UnityWebRequestAsyncOperation GetAssignmentAsync(string id)
         {
             string url = Url + k_GetAssignmentEndpoint + "?id=" + id;
-            UnityWebRequest webRequest = new UnityWebRequest(url, "POST");
+            UnityWebRequest webRequest = new UnityWebRequest(url, "GET");
             webRequest.SetRequestHeader("Content-Type", "application/json");
             webRequest.downloadHandler = new DownloadHandlerBuffer();
             Debug.Log("Calling... " + url);

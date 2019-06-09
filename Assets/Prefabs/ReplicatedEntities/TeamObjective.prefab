@@ -56,5 +56,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0b26653afb76acc4c80fe40b49c335a2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  guid: fe9bb49ef6ad01d41a35e265ae3b0391
-  netID: 6f3f2163ae376c4fa803ab451880c58c
+  m_SerializedData:
+    assetGuid:
+      val0: -23350114
+      val1: 30733997
+      val2: 1709323546
+      val3: -1862059090
+  netID: 50366a866dd54744a2a28babd5b53646

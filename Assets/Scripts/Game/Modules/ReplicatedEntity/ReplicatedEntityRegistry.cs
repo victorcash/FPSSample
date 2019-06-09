@@ -6,18 +6,6 @@ using UnityEngine;
 using UnityEditor;
 #endif
 
-interface IReplicatedEntityProvider
-{
-    WeakAssetReference GetReplicatedServerAsset();
-    WeakAssetReference GetReplicatedClientAsset();
-}
-
-public abstract class ReplicatedEntityFactor : ScriptableObject
-{
-    public int typeId;
-    public abstract Entity Create(EntityManager entityManager);
-    public abstract INetworkSerializable[] CreateSerializables(EntityManager entityManager, Entity entity);
-}
 
 
 [CreateAssetMenu(fileName = "ReplicatedEntityRegistry",
@@ -25,181 +13,314 @@ public abstract class ReplicatedEntityFactor : ScriptableObject
 public class ReplicatedEntityRegistry : RegistryBase
 {
     [Serializable]
-    public struct Entry
+    public class Entry
     {
+        public WeakAssetReference guid;
         // Each entry has either a asset reference or factory. Never both
-        public WeakAssetReference prefab;
-        public ReplicatedEntityFactor factory;
+        public WeakAssetReference prefab = new WeakAssetReference();
+        public ReplicatedEntityFactory factory;
     }
 
-    public bool server;
-    public Entry[] entries;
-    public Dictionary<string, int> guidToIndexMap = new Dictionary<string, int>();
+    [SerializeField]
+    public List<Entry> entries = new List<Entry>();
 
-    void OnEnable()
+    public void LoadAllResources(BundledResourceManager resourceManager)
     {
-        // Build guid to index map
-        for (int i = 0; i < entries.Length; i++)
+        for(var i=0;i< entries.Count;i++)
         {
-            if (entries[i].factory != null)
-                continue;
-            
-            string guid = entries[i].prefab.guid;
-            if (guid != "")
+            resourceManager.GetSingleAssetResource(entries[i].guid);
+        }
+    }
+
+    public Entity Create(EntityManager entityManager, BundledResourceManager resourceManager, 
+        GameWorld world, ReplicatedEntity repEntity)
+    {
+        var prefab = repEntity.gameObject;
+        
+        if (prefab == null)
+        {
+            GameDebug.LogError("Cant create. Not gameEntityType. GameEntityTypeDefinition:" + name);
+            return Entity.Null;
+        }
+
+        var gameObjectEntity = world.Spawn<GameObjectEntity>(prefab);
+        gameObjectEntity.name = string.Format("{0}",prefab.name);
+        var entity = gameObjectEntity.Entity;
+        
+        return entity;
+    }
+
+    public Entry GetEntry(WeakAssetReference guid)
+    {
+        var index = GetEntryIndex(guid);
+        if (index != -1)
+            return entries[index];
+        return null;
+    }
+
+    public int GetEntryIndex(WeakAssetReference guid)
+    {
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].guid.Equals(guid))
             {
-                GameDebug.Assert(!guidToIndexMap.ContainsKey(guid));
-                guidToIndexMap.Add(guid, i);
+                return i;
             }
         }
+        return -1;
     }
-
+    
+    
 #if UNITY_EDITOR
-    public override void UpdateRegistry(bool dry)
+
+
+    public override void PrepareForBuild()
     {
-        var newEntries = new List<Entry>();
-        var handledGuids = new List<string>();
-
-        // Handle all setups for server and client specific prefabs 
-        var guids = AssetDatabase.FindAssets("t:" + typeof(ScriptableObject).Name);
-        foreach (var guid in guids)
-        {
-            var path = AssetDatabase.GUIDToAssetPath(guid);
-            var type = AssetDatabase.GetMainAssetTypeAtPath(path);
-
-            if (!typeof(IReplicatedEntityProvider).IsAssignableFrom(type))
-                continue;
-
-            var provider = AssetDatabase.LoadAssetAtPath<ScriptableObject>(path) as IReplicatedEntityProvider;
-
-            var serverAsset = provider.GetReplicatedServerAsset();
-            var clientAsset = provider.GetReplicatedClientAsset();
-
-            if (serverAsset.guid != "")
-                handledGuids.Add(serverAsset.guid);
-            if (clientAsset.guid != "")
-                handledGuids.Add(clientAsset.guid);
-
-            var entityGuid = server ? serverAsset.guid : clientAsset.guid;
-            var entry = new Entry();
-            entry.prefab = new WeakAssetReference()
-            {
-                guid = entityGuid
-            };
-            newEntries.Add(entry);
-        }
-
-        // Find all prefabs with replicated entity component that is not already registered
-        guids = AssetDatabase.FindAssets("t:" + typeof(GameObject).Name);
+        Debug.Log("ReplicatedEntityRegistry"); 
+        
+        entries.Clear();
+        
+        var guids = AssetDatabase.FindAssets("t:GameObject");
         foreach (var guid in guids)
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
             var go = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-            var replicatedEntity = go.GetComponent<ReplicatedEntity>();
-            if (replicatedEntity == null)
+
+            var replicated = go.GetComponent<ReplicatedEntity>();
+            if (replicated == null)
                 continue;
 
-
-            // Make sure guid is correct so it can be used to when finding type id from instantiated entity
-            if (replicatedEntity.guid != guid)
+            
+////            PrefabUtility.LoadPrefabContents()
+//            var stage =  PrefabStageUtility.GetPrefabStage(go);
+//            stage.prefabAssetPath          
+            
+            replicated.SetAssetGUID(guid);
+            
+            Debug.Log("   Adding guid:" + guid + " prefab:" + path);
+            
+            var guidData = new WeakAssetReference(guid);
+            entries.Add(new Entry
             {
-                replicatedEntity.guid = guid;
-                GameDebug.Log("Setting GUID for " + replicatedEntity + " to " + guid);
-                EditorUtility.SetDirty(go);
-            }
-
-            if (handledGuids.Contains(guid))
-                continue;
-
-            if (dry) Debug.Log("  Adding " + path);
-
-
-            var entry = new Entry();
-            entry.prefab = new WeakAssetReference
-            {
-                guid = guid
-            };
-            newEntries.Add(entry);
+                guid = guidData,
+                prefab = new WeakAssetReference(guid)
+            });
         }
         
-        // Find all factories
-        guids = AssetDatabase.FindAssets("t:" + typeof(ReplicatedEntityFactor).Name);
+        guids = AssetDatabase.FindAssets("t:ReplicatedEntityFactory");
         foreach (var guid in guids)
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            var factory = AssetDatabase.LoadAssetAtPath<ReplicatedEntityFactor>(path);
-                
-            var entry = new Entry
+            var factory = AssetDatabase.LoadAssetAtPath<ReplicatedEntityFactory>(path);
+
+            factory.SetAssetGUID(guid);
+            
+            Debug.Log("   Adding guid:" + guid + " factory:" + factory);
+            
+            var guidData = new WeakAssetReference(guid);
+            entries.Add(new Entry
             {
+                guid = guidData,
                 factory = factory
-            };
-            newEntries.Add(entry);
+            });
         }
         
-        if (!dry)
-            entries = newEntries.ToArray();
-
-        // Make sure factories have correct typeId
-        if (!dry)
-        {
-            for(var i=0;i<entries.Length;i++)
-            {
-                if (entries[i].factory == null)
-                    continue;
-
-                entries[i].factory.typeId = i;
-                EditorUtility.SetDirty(entries[i].factory);
-            }
-        }
+        EditorUtility.SetDirty(this);
     }
 
+    
+//
+//    public int GetId(string guid)
+//    {
+//        if (guid == null || guid == "")
+//            return -1;
+//        
+//        for (int i = 0; i < entries.Count; i++)
+//        {
+//            if (entries[i].prefab.guid == guid)
+//                return i;
+//        }
+//        return -1;
+//    }
+//    
+//    public int GetId(ReplicatedEntityFactory factory)
+//    {
+//        if (factory == null)
+//            return -1;
+//        
+//        for (int i = 0; i < entries.Count; i++)
+//        {
+//            if (entries[i].factory == factory)
+//                return i;
+//        }
+//        return -1;
+//    }
+//
+//    public void ClearAtId(int index)
+//    {
+//        entries[index].prefab.guid = "";
+//        entries[index].factory = null;
+//        
+//        EditorUtility.SetDirty(this);
+//    }
+//
+//    public int FindFreeId()
+//    {
+//        for (var i = 0; i < entries.Count; i++)
+//        {
+//            if (entries[i].prefab.guid == "" && entries[i].factory == null)
+//                return i;
+//        }
+//
+//        var index = entries.Count;
+//        entries.Add(new Entry());
+//        return index;
+//    }
+//
+//    public void SetPrefab(int registryId, string guid)
+//    {
+//        GameDebug.Assert(entries[registryId].prefab.guid == "","GUID already set");
+//        GameDebug.Assert(entries[registryId].factory == null,"Factory already set");
+//
+//        entries[registryId].prefab.guid = guid;
+//        EditorUtility.SetDirty(this);
+//    }
+//    
+//    public void SetFactory(int registryId, ReplicatedEntityFactory factory)
+//    {
+//        GameDebug.Assert(entries[registryId].prefab.guid == "","GUID already set");
+//        GameDebug.Assert(entries[registryId].factory == null,"Factory already set");
+//
+//        entries[registryId].factory = factory;
+//        EditorUtility.SetDirty(this);
+//    }
+//    
+    public static ReplicatedEntityRegistry GetReplicatedEntityRegistry()
+    {
+        var registryGuids = AssetDatabase.FindAssets("t:ReplicatedEntityRegistry");
+        if (registryGuids == null || registryGuids.Length == 0)
+        {
+            GameDebug.LogError("Failed to find ReplicatedEntityRegistry");
+            return null;
+        }
+        if (registryGuids.Length > 1)
+        {
+            GameDebug.LogError("There should only be one ReplicatedEntityRegistry in project");
+            return null;
+        }
+
+        var guid = registryGuids[0];
+        var registryPath = AssetDatabase.GUIDToAssetPath(guid);
+        var registry = AssetDatabase.LoadAssetAtPath<ReplicatedEntityRegistry>(registryPath);
+        return registry;
+    }
+    
     public override void GetSingleAssetGUIDs(List<string> guids, bool serverBuild)
     {
         foreach (var entry in entries)
         {
             if (entry.factory != null)
+            {
+                var factoryPath = AssetDatabase.GetAssetPath(entry.factory);
+                var factoryGuid = AssetDatabase.AssetPathToGUID(factoryPath);
+                guids.Add(factoryGuid);
+
                 continue;
-            guids.Add(entry.prefab.guid);
+            }
+                
+            
+            if (!entry.prefab.IsSet())
+                continue;
+            
+            guids.Add(entry.prefab.GetGuidStr());
         }
     }
 
     public override bool Verify()
     {
         var verified = true;
-        foreach (var entry in entries)
+        for (var i = 0; i < entries.Count; i++)
         {
-            if (entry.factory != null)
+            var entry = entries[i];
+
+            if (!entry.prefab.IsSet())
+            {
+                Debug.Log("Entry:" + i + " is free");
                 continue;
+            }
+
+            if (entry.prefab.IsSet() && entry.factory != null)
+            {
+                Debug.Log("Entry:" + i + " registered with both prefab and factory");
+                verified = false;
+                continue;
+            }
             
-            var p = AssetDatabase.GUIDToAssetPath(entry.prefab.guid);
-            if (p == null || p == "")
+            if (entry.factory != null)
             {
-                Debug.Log("Cant find path for guid:" + entry.prefab.guid);
-                verified = false;
-                continue;
+                var factoryPath = AssetDatabase.GetAssetPath(entry.factory);
+                if (factoryPath == null || factoryPath == "")
+                {
+                    Debug.Log("Cant find path for factory:" + entry.factory);
+                    verified = false;
+                }
+                
+//                var guids = new List<string>();
+//                entry.factory.GetSingleAssetGUIDs(guids,false);
+//                entry.factory.GetSingleAssetGUIDs(guids,true);
+//                foreach (var guid in guids)
+//                {
+//                    var p = AssetDatabase.GUIDToAssetPath(guid);
+//                    if (p == null || p == "")
+//                    {
+//                        Debug.Log("Cant find path for guid:" + entry.prefab.guid);
+//                        verified = false;
+//                    }
+//                }
+//                
+////                if (entry.factory.registryId != i)
+////                {
+////                    Debug.Log(entry.factory + " - Index wrong. Registered as id:" + i + " but registryId is:" +
+////                              entry.factory.registryId);
+////                    verified = false;
+////                }
+                
+                if (!verified)
+                    continue;
             }
-
-            var go = AssetDatabase.LoadAssetAtPath<GameObject>(p);
-            if (go == null)
+            else
             {
-                Debug.Log("Cant load asset for guid:" + entry.prefab.guid + " path:" + p);
-                verified = false;
-                continue;
-            }
+                var p = AssetDatabase.GUIDToAssetPath(entry.prefab.GetGuidStr());
+                if (p == null || p == "")
+                {
+                    Debug.Log("Cant find path for guid:" + entry.prefab.GetGuidStr());
+                    verified = false;
+                    continue;
+                }
 
-            var replicatedEntity = go.GetComponent<ReplicatedEntity>();
-            if (go == null)
-            {
-                Debug.Log(go + " has no ReplicatedEntity component");
-                verified = false;
-                continue;
-            }
+                var go = AssetDatabase.LoadAssetAtPath<GameObject>(p);
+                if (go == null)
+                {
+                    Debug.Log("Cant load asset for guid:" + entry.prefab.GetGuidStr() + " path:" + p);
+                    verified = false;
+                    continue;
+                }
 
-            if (replicatedEntity.guid != entry.prefab.guid)
-            {
-                Debug.Log(go + "GUID mixup. asset GUID:" + entry.prefab.guid + " GUID set in prefab:" +
-                          replicatedEntity.guid);
-                verified = false;
-                continue;
+                var repEntity = go.GetComponent<ReplicatedEntity>();
+                if (repEntity == null)
+                {
+                    Debug.Log(go + " has no GameEntityType component");
+                    verified = false;
+                    continue;
+                }
+
+//                if (repEntity.Value.registryId != i)
+//                {
+//                    Debug.Log(go + "Id wrong. Registered as:" + i + " but registryId is:" +
+//                              repEntity.Value.registryId);
+//                    verified = false;
+//                    continue;
+//                }
             }
         }
 

@@ -2,6 +2,7 @@
 using UnityEngine.Playables;
 using UnityEngine;
 using Unity.Entities;
+using UnityEngine.Experimental.VFX;
 
 [DisallowMultipleComponent]
 [ClientOnlyComponent]
@@ -19,16 +20,16 @@ public class TerraformerWeaponA : MonoBehaviour
     public float ventStartSpeed = 1000;
 
     public SoundDef primaryFireSound;
-    public ParticleSystem primaryFireEffect;
+    public VisualEffect primaryMuzzleFlash;
     public HitscanEffectTypeDefinition hitscanEffect;
     public SpatialEffectTypeDefinition environmentImpactEffect;
     public SpatialEffectTypeDefinition characterImpactEffect;
 
     public SoundDef secondaryFireSound;
-    public ParticleSystem secondaryFireEffect;
+    public VisualEffect secondaryMuzzleFlash;
     
     public SoundDef meleeImpactSound;
-    public ParticleSystem meleeImpactEffect;
+    public VisualEffect meleeImpactEffect;
     
     [NonSerialized] public TickEventHandler primaryFireEvent = new TickEventHandler(0.5f);
     [NonSerialized] public TickEventHandler secondaryFireEvent = new TickEventHandler(0.5f);
@@ -39,7 +40,7 @@ public class TerraformerWeaponA : MonoBehaviour
     public int nextVentIndex;
 
     public Vector3 m_lastGrenadeFuelWorldPos;
-    public CharacterPredictedState.StateData.Action m_prevAction;
+    public CharacterPredictedData.Action m_prevAction;
 
     void Awake()
     {
@@ -50,27 +51,27 @@ public class TerraformerWeaponA : MonoBehaviour
 
 // System
 [DisableAutoCreation]
-public class UpdateTerraformerWeaponA : BaseComponentSystem<CharacterItem,TerraformerWeaponA>
+public class UpdateTerraformerWeaponA : BaseComponentSystem<CharacterPresentationSetup,TerraformerWeaponA>
 {
     public UpdateTerraformerWeaponA(GameWorld world) : base(world)
     {
         ExtraComponentRequirements = new[] {ComponentType.Subtractive<DespawningEntity>(),};
     }
     
-    protected override void Update(Entity entity, CharacterItem item, TerraformerWeaponA weapon)
+    protected override void Update(Entity entity, CharacterPresentationSetup charPresentation, TerraformerWeaponA weapon)
     {
-        if (!item.visible)
+        if (!charPresentation.IsVisible)
             return;
-        
-        var abilityCtrl = EntityManager.GetComponentObject<AbilityController>(item.character);
-        Update(m_world.worldTime, weapon, abilityCtrl);
+
+        var charRepAll = EntityManager.GetComponentData<CharacterReplicatedData>(charPresentation.character);
+        Update(m_world.worldTime, weapon, ref charRepAll);
     }
 
 
-    void Update(GameTime time, TerraformerWeaponA weapon, AbilityController abilityCtrl)
+    void Update(GameTime time, TerraformerWeaponA weapon, ref CharacterReplicatedData charRepAll)
     {
         // Update using AutoRifle ability state
-        var autoRifleAbility = abilityCtrl.GetAbilityEntity(EntityManager,typeof(Ability_AutoRifle));
+        var autoRifleAbility = charRepAll.FindAbilityWithComponent(EntityManager,typeof(Ability_AutoRifle.InterpolatedState));
         GameDebug.Assert(autoRifleAbility != Entity.Null,"AbilityController does not own a Ability_AutoRifle ability");
         var autoRifleInterpolatedState = EntityManager.GetComponentData<Ability_AutoRifle.InterpolatedState>(autoRifleAbility);
         if (weapon.primaryFireEvent.Update(time, autoRifleInterpolatedState.fireTick))
@@ -82,31 +83,33 @@ public class UpdateTerraformerWeaponA : BaseComponentSystem<CharacterItem,Terraf
                 weapon.primaryFireSoundHandle = Game.SoundSystem.Play(weapon.primaryFireSound, weapon.muzzle);
             }
                 
-            if(weapon.primaryFireEffect != null)
-                weapon.primaryFireEffect.Play();
-                
-            if(weapon.hitscanEffect != null)
-                HitscanEffectRequest.Create(PostUpdateCommands, weapon.hitscanEffect, weapon.muzzle.position, 
-                    autoRifleInterpolatedState.fireEndPos );
+            if(weapon.primaryMuzzleFlash != null)
+                weapon.primaryMuzzleFlash.Play();
+
+            if (weapon.hitscanEffect != null)
+            {
+                World.GetExistingManager<HandleHitscanEffectRequests>().Request(weapon.hitscanEffect, 
+                    weapon.muzzle.position, autoRifleInterpolatedState.fireEndPos);
+            }
 
             if (autoRifleInterpolatedState.impactType != Ability_AutoRifle.ImpactType.None)
             {
                 var rotation = Quaternion.LookRotation(autoRifleInterpolatedState.impactNormal);
                 if (autoRifleInterpolatedState.impactType == Ability_AutoRifle.ImpactType.Character)
                 {
-                    SpatialEffectRequest.Create(PostUpdateCommands, weapon.characterImpactEffect, 
+                    World.GetExistingManager<HandleSpatialEffectRequests>().Request(weapon.characterImpactEffect, 
                         autoRifleInterpolatedState.fireEndPos, rotation);
                 }
                 else
                 {
-                    SpatialEffectRequest.Create(PostUpdateCommands, weapon.environmentImpactEffect, 
+                    World.GetExistingManager<HandleSpatialEffectRequests>().Request(weapon.environmentImpactEffect, 
                         autoRifleInterpolatedState.fireEndPos, rotation);
                 }
             }
         }
    
         // Update using ProjectileLauncher ability state
-        var rocketAbility = abilityCtrl.GetAbilityEntity(EntityManager,typeof(Ability_ProjectileLauncher));
+        var rocketAbility = charRepAll.FindAbilityWithComponent(EntityManager,typeof(Ability_ProjectileLauncher.InterpolatedState));
         GameDebug.Assert(rocketAbility != Entity.Null,"AbilityController does not own a Ability_ProjectileLauncher ability");
         var rocketLaunchInterpolatedState = EntityManager.GetComponentData<Ability_ProjectileLauncher.InterpolatedState>(rocketAbility);
         if (weapon.secondaryFireEvent.Update(time, rocketLaunchInterpolatedState.fireTick))
@@ -114,12 +117,12 @@ public class UpdateTerraformerWeaponA : BaseComponentSystem<CharacterItem,Terraf
             if(weapon.secondaryFireSound != null)
                 Game.SoundSystem.Play(weapon.secondaryFireSound, weapon.muzzle);
                 
-            if(weapon.secondaryFireEffect != null)
-                weapon.secondaryFireEffect.Play();
+            if(weapon.secondaryMuzzleFlash != null)
+                weapon.secondaryMuzzleFlash.Play();
         }
 
         // Update using Melee ability ability state
-        var meleeAbility = abilityCtrl.GetAbilityEntity(EntityManager,typeof(Ability_Melee));
+        var meleeAbility = charRepAll.FindAbilityWithComponent(EntityManager,typeof(Ability_Melee.InterpolatedState));
         GameDebug.Assert(meleeAbility != Entity.Null,"AbilityController does not own a Ability_Melee ability");
         var meleeInterpolatedState = EntityManager.GetComponentData<Ability_Melee.InterpolatedState>(meleeAbility);
         if (weapon.meleeImpactEvent.Update(time, meleeInterpolatedState.impactTick))
@@ -206,17 +209,17 @@ public class TerraformerWeaponClientProjectileSpawnHandler : InitializeComponent
     public TerraformerWeaponClientProjectileSpawnHandler(GameWorld world) : base(world)
     {}
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
-        WeaponGroup = GetComponentGroup(typeof(TerraformerWeaponA), typeof(CharacterItem));
+        base.OnCreateManager();
+        WeaponGroup = GetComponentGroup(typeof(TerraformerWeaponA), typeof(CharacterPresentationSetup));
     }
 
     protected override void Initialize(ref ComponentGroup group)
     {
         var clientProjectileArray = group.GetComponentArray<ClientProjectile>();
         var weaponArray = WeaponGroup.GetComponentArray<TerraformerWeaponA>();
-        var itemArray =  WeaponGroup.GetComponentArray<CharacterItem>();
+        var charPresentationArray =  WeaponGroup.GetComponentArray<CharacterPresentationSetup>();
         
         for (var i = 0; i < clientProjectileArray.Length; i++)
         {
@@ -225,14 +228,14 @@ public class TerraformerWeaponClientProjectileSpawnHandler : InitializeComponent
          var projectileData = EntityManager.GetComponentData<ProjectileData>(clientProjectile.projectile);
          var projectileOwner = projectileData.projectileOwner;
         
-         for (var j = 0; j < itemArray.Length; j++)
+         for (var j = 0; j < charPresentationArray.Length; j++)
          {
-             var item = itemArray[j];
+             var charPresentation = charPresentationArray[j];
         
-             if (!item.visible)
+             if (!charPresentation.IsVisible)
                  continue;
              
-             if (item.character == projectileOwner)
+             if (charPresentation.character == projectileOwner)
              {
                  var weapon = weaponArray[j];
                  var pos =  weapon.muzzle.position;

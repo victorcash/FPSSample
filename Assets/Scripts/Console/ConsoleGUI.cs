@@ -15,7 +15,7 @@ public class ConsoleGUI : MonoBehaviour, IConsoleUI
 
     public void Init()
     {
-        buildIdText.text = Game.game.buildId;
+        buildIdText.text = Game.game.buildId + " (" + Application.unityVersion + ")";
     }
 
     public void Shutdown()
@@ -105,6 +105,10 @@ public class ConsoleGUI : MonoBehaviour, IConsoleUI
         input_field.ActivateInputField();
 
         Console.EnqueueCommand(value);
+    }
+
+    public void SetPrompt(string prompt)
+    {
     }
 
     List<string> m_Lines = new List<string>();

@@ -3,33 +3,36 @@
 [DisableAutoCreation]
 public class TeleporterSystemClient : ComponentSystem
 {
-	public struct Teleporters
-	{
-		public ComponentArray<TeleporterPresentation> teleporterPresentations;
-		public ComponentArray<TeleporterClient> teleporterClients;
-        
-	}
-
-	[Inject]
-	Teleporters teleporters;
+	ComponentGroup Group;
 
 	public TeleporterSystemClient(GameWorld gameWorld)
 	{
 		m_GameWorld = gameWorld;
 	}
 
+	protected override void OnCreateManager()
+	{
+		base.OnCreateManager();
+		Group = GetComponentGroup(typeof(TeleporterPresentationData), typeof(TeleporterClient));
+	}
+
 	protected override void OnUpdate()
 	{
-		for(int i = 0, c = teleporters.teleporterClients.Length; i < c; i++)
+		var teleporterClientArray = Group.GetComponentArray<TeleporterClient>();
+		var teleporterPresentationArray = Group.GetComponentDataArray<TeleporterPresentationData>();
+		
+		for(int i = 0, c = teleporterClientArray.Length; i < c; i++)
 		{
-			var teleporterPresentation = teleporters.teleporterPresentations[i];
-			var teleporterClient = teleporters.teleporterClients[i];
+			var teleporterClient = teleporterClientArray[i];
+			var teleporterPresentation = teleporterPresentationArray[i];
 			
 			if (teleporterClient.effectEvent.Update(m_GameWorld.worldTime, teleporterPresentation.effectTick))
 			{
-				if(teleporterClient.effect != null)
-					SpatialEffectRequest.Create(PostUpdateCommands, teleporterClient.effect, 
+				if (teleporterClient.effect != null)
+				{
+					World.GetExistingManager<HandleSpatialEffectRequests>().Request(teleporterClient.effect, 
 						teleporterClient.effectTransform.position, teleporterClient.effectTransform.rotation);
+				}
 			}
 		}
 	}

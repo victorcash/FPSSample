@@ -26,11 +26,8 @@ Unity become available in ECS-aware versions, we will migrate to them.
 
 Current status at a glance:
 ```
-Unity version: 2018.3 beta 6
+Unity version: 2018.3.8f1
 Platforms    : Windows (client and server) and Linux (server only)
-Fun          : Yes
-Finished     : No
-Useful       : We think so
 ```
 
 ## Getting the project
@@ -43,14 +40,16 @@ Note, that
 > **will not work**. You must clone the project with a version of git that has LFS.
 > You can download Git LFS here: https://git-lfs.github.com/.
 
-The project size is about 18GB. If your cloned repository is much smaller,
+The project size is about 18GB (size of Assets folder). Your cloned repository
+will be almost double of that due to git state. If it is much smaller,
 you most likely did not have LFS when you cloned.
 
 ## Getting the right version of Unity
 
 Once you have cloned the repository, you should install
 the version of Unity that is listed above in the prerequisites section. Make
-sure you include windows standalone support in your installation.
+sure you include windows standalone support in your installation (and Linux support
+if you want to build the Linux headless server).
 
 ## Opening the project for the first time
 
@@ -62,11 +61,9 @@ few clients to it.
 The first time you open the project you need patience! It takes a while
 to import all the assets.
 
-> __NOTE__: Due to a bug in Unity 2018.3 beta, you have to take
-the following steps right after the initial import:
-> 1. Search for `t:prefab` in the Project search field. Then click on the first prefab and shift+click on the last to select them all. Right click and select __Reimport__.
-> 2. Search for `t:model` in the Project search field. Repeat the same steps as for prefabs to reimport them all.
-> 3. __IF__ you are on a version older than beta 6, you may have had a few crashes during import. In that case you need to find `GooRocket` and `GooRifle` in project, right click and select __Reimport__. 
+> __NOTE__: Due to a bug in Unity 2018.3, you have to take the following step right after the initial import:
+> 1 Search for `Firstperson_Projection` in the Project search field. Select the 4 shaders, right click and reimport them.
+> 2 If you have script compile errors related to entities, you need to remove and re-install the entities package.
 >
 > One day soon we will remove this note and there will be cake.
 
@@ -93,8 +90,12 @@ you can move around and test your level, player traversal and weapons.
 
 ### Building bundles and standalone
 
-Leave playmode again and in the Project Tools windows, in the
-bundles section, press __All \[force\]__.
+Leave playmode again and in the Project Tools window, verify that
+it says "Building for: StandaloneWindows64..." under the Game headline.
+If it does not, change your platform in the usual way, using File > Build
+settings window.
+
+Now, in the Project Tools window in the bundles section, press __All \[force\]__.
 
 This will build the levels and other assets into assetbundles. The first time
 around this will take a significant amount of time as all shaders have to be
@@ -102,6 +103,8 @@ compiled.
 
 Once you have built the bundles, hit __Build game__ in the game section.
 This builds the standalone player. Again, first time will be slow.
+
+> __NOTE__: Due to a limitation in Unity 2018.3, you have to look out for errors like this `Maximum number (256) of shader keywords exceeded, keyword <KEYWORD_NAME> will be ignored.` and similar. If you get these, you can close and open Unity and then try and build again. The errors are relatively harmless but can lead to graphical artifacts as some shaders will have wrong keywords.
 
 ### Using the quick start launcher
 
@@ -127,11 +130,9 @@ push versions of the project to github from there. As we do that we will update
 the [CHANGELOG](CHANGELOG.md) with highlights but the full history is not
 carried over.
 
-For legal and practical reasons we are not able to take larger contributions
-just now. We are working to see how we can make it happen and we are always happy
-to hear about bugfixes and ideas for improvements in our forum. If you post
-bugfixes, we remind you that they will be covered by
-[Unity Contribution Agreement](https://unity3d.com/legal/licenses/Unity_Contribution_Agreement).
+For practical reasons we are not able to take larger contributions
+just now. But bugfixes are very welcome! Read the guidelines for
+contributing in [CONTRIBUTING](CONTRIBUTING.md).
 
 ## More information
 

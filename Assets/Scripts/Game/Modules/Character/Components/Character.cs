@@ -1,50 +1,75 @@
 ﻿using System;
+using System.Collections.Generic;
+using Unity.Entities;
 using UnityEngine;
 
-[RequireComponent(typeof(DamageHistory))]
 [RequireComponent(typeof(HealthState))]
-[RequireComponent(typeof(CharacterAnimState))]
-[RequireComponent(typeof(UserCommandComponent))]
-[RequireComponent(typeof(AbilityController))]
-[RequireComponent(typeof(RagdollState))]
-[RequireComponent(typeof(HitCollisionOwner))]
-[RequireComponent(typeof(AnimStateController))]
-[RequireComponent(typeof(CharacterPredictedState))]
-[RequireComponent(typeof(CharacterMoveQuery))]
-public class Character : MonoBehaviour, INetworkSerializable
+[DisallowMultipleComponent]
+public class Character : MonoBehaviour
 {
-    public GameObject geomtry;
-    public Transform itemAttachBone;
-    
-    public Transform weaponBoneDebug;
-    public Vector3 weaponOffsetDebug;
-    
-    [NonSerialized] public bool isVisible = true;
     [NonSerialized] public float eyeHeight = 1.8f;
     [NonSerialized] public string characterName;
-    [NonSerialized] public HealthState healthState;
-    [NonSerialized] public int heroTypeIndex;
     [NonSerialized] public HeroTypeAsset heroTypeData;
+    [NonSerialized] public Entity presentation;    // Main char presentation used updating animation state 
+    [NonSerialized] public List<CharacterPresentationSetup> presentations = new List<CharacterPresentationSetup>();
+    
+    [NonSerialized] public Vector3 m_TeleportToPosition;    
+    [NonSerialized] public Quaternion m_TeleportToRotation;
+    [NonSerialized] public bool m_TeleportPending;
+  
+    [NonSerialized] public int teamId = -1;       
 
-    public void SetVisible(bool visible)
+    [NonSerialized] public float altitude; 
+    [NonSerialized] public Collider groundCollider; 
+    [NonSerialized] public Vector3 groundNormal;
+    
+    public void TeleportTo(Vector3 position, Quaternion rotation)
     {
-        isVisible = visible;
-        if(geomtry != null && geomtry.activeSelf != visible)  
-            geomtry.SetActive(visible);
+        m_TeleportPending = true;
+        m_TeleportToPosition = position;
+        m_TeleportToRotation = rotation;
     }
     
-    private void Awake()
-    {
-        healthState = GetComponent<HealthState>();
-    }    
+    CharacterPredictedData[] historyBuffer;
+    private int historyFirstIndex;
+    private int historyCount;
     
-    public void Serialize(ref NetworkWriter writer, IEntityReferenceSerializer refSerializer)
+    public void ShowHistory(int tick)
     {
-        writer.WriteInt16("heroType",(short)heroTypeIndex);
-    }
+        if(historyBuffer == null)
+            historyBuffer = new CharacterPredictedData[30];
+        
+        var goe = GetComponent<GameObjectEntity>();
 
-    public void Deserialize(ref NetworkReader reader, IEntityReferenceSerializer refSerializer, int tick)
-    {
-        heroTypeIndex = reader.ReadInt16();
+        var nextIndex = (historyFirstIndex + historyCount) % historyBuffer.Length;
+        historyBuffer[nextIndex] = goe.EntityManager.GetComponentData<CharacterPredictedData>(goe.Entity);;
+//        GameDebug.Log(state.locoState + " sprint:" + state.sprinting + " action:" + state.action);
+            
+        if (historyCount < historyBuffer.Length)
+            historyCount++;
+        else
+            historyFirstIndex = (historyFirstIndex + 1) % historyBuffer.Length;
+
+
+        for (int i = 0; i < historyCount; i++)
+        {
+            var index = (historyFirstIndex + i) % historyBuffer.Length;
+            var state = historyBuffer[index];
+            
+            var y = 2 + i;
+            
+            {
+                var color = (Color32)Color.HSVToRGB(0.21f*(int)state.locoState, 1, 1);
+                var colorRGB = ((color.r >> 4) << 8) | ((color.g >> 4) << 4) | (color.b >> 4); 
+                DebugOverlay.Write(2,y, "^{0}{1}",  colorRGB.ToString("X3"), state.locoState.ToString());
+            }
+            DebugOverlay.Write(14,y, state.sprinting == 1 ? "Sprint" : "no-sprint");
+            {
+                var color = (Color32)Color.HSVToRGB(0.21f*(int)state.action, 1, 1);
+                var colorRGB = ((color.r >> 4) << 8) | ((color.g >> 4) << 4) | (color.b >> 4); 
+                DebugOverlay.Write(26,y, "^{0}{1}:{2}",  colorRGB.ToString("X3"), state.action.ToString(), state.actionStartTick);
+            }
+        }
+
     }
 }

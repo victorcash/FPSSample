@@ -47,6 +47,8 @@ public static class RenderSettings
     public static ConfigVar rResolution;
     [ConfigVar(Name = "r.latesync", DefaultValue = "1", Description = "Sync with render thread late", Flags = ConfigVar.Flags.None)]
     public static ConfigVar rLateSync;
+    [ConfigVar(Name = "r.occlusionthreshold", DefaultValue = "50", Description = "Occlusion threshold", Flags = ConfigVar.Flags.None)]
+    public static ConfigVar rOcclusionThreshold;
 
     public static void Init()
     {
@@ -66,14 +68,18 @@ public static class RenderSettings
      * */
 
     static int currentResX, currentResY, currentResRate;
+    static int currentQualityIdx;
+
     public static void Update()
     {
-        /* TODO (petera) Remove post 18.3b7
         if (rLateSync.ChangeCheck())
         {
             GraphicsDeviceSettings.waitForPresentSyncPoint = rLateSync.IntValue > 0 ? WaitForPresentSyncPoint.EndFrame : WaitForPresentSyncPoint.BeginFrame;
         }
-        */
+        if(rOcclusionThreshold.ChangeCheck())
+        {
+            HDRenderPipeline.s_OcclusionThreshold = rOcclusionThreshold.FloatValue;
+        }
 
         bool updateAAFlags = false;
         bool updateFrameSettings = false;
@@ -82,12 +88,11 @@ public static class RenderSettings
             CmdResolution(new string[] { rResolution.Value });
         else
         {
-            if (currentResX != Screen.currentResolution.width || currentResY != Screen.height || currentResRate != Screen.currentResolution.refreshRate)
+            if (currentResX != Screen.width || currentResY != Screen.height)
             {
                 currentResX = Screen.width;
                 currentResY = Screen.height;
-                currentResRate = Screen.currentResolution.refreshRate;
-                rResolution.Value = currentResX + "x" + currentResY + "@" + currentResRate;
+                rResolution.Value = currentResX + "x" + currentResY;
             }
         }
 
@@ -112,9 +117,12 @@ public static class RenderSettings
         }
         else
         {
-            var current = QualitySettings.names[QualitySettings.GetQualityLevel()];
-            if (rQuality.Value != current)
-                rQuality.Value = current;
+            var currentIdx = QualitySettings.GetQualityLevel();
+            if(currentQualityIdx != currentIdx)
+            {
+                currentQualityIdx = currentIdx;
+                rQuality.Value = QualitySettings.names[currentIdx];
+            }
         }
 
         if (showQuality.IntValue > 0)

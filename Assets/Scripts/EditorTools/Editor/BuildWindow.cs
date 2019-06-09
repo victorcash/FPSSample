@@ -101,8 +101,6 @@ public class BuildWindow : EditorWindow
             quickstartData = JsonUtility.FromJson<QuickstartData>(str);
         else
             quickstartData = new QuickstartData();
-
-        // TODO reset m_LevelInfos if LevelInfos are added/removed
     }
 
     [MenuItem("FPS Sample/Windows/Project Tools")]
@@ -119,6 +117,21 @@ public class BuildWindow : EditorWindow
         if (m_LevelInfos == null)
             m_LevelInfos = BuildTools.LoadLevelInfos();
 
+        // Verify levelinfos
+        bool loadLevelInfos = false;
+        foreach (var levelInfo in m_LevelInfos)
+        {
+            if (levelInfo == null)
+            {
+                loadLevelInfos = true;
+                break;
+            }
+        }
+        if(loadLevelInfos)
+            m_LevelInfos = BuildTools.LoadLevelInfos();
+
+        
+        
         m_ScrollPos = GUILayout.BeginScrollView(m_ScrollPos);
 
         GUILayout.Label("Project", EditorStyles.boldLabel);
@@ -161,6 +174,12 @@ public class BuildWindow : EditorWindow
         GUILayout.EndHorizontal();
         GUILayout.EndHorizontal();
 
+        
+        
+        
+        
+        
+        
         LevelInfo openLevel = null;
         foreach (var levelInfo in m_LevelInfos)
         {
@@ -222,33 +241,33 @@ public class BuildWindow : EditorWindow
     }
 
     static bool s_SingleLevelBuilding = false;
+    static bool s_ForceBuildBundles = true;
     void DrawBuildTools()
     {
         var action = BuildAction.None;
-
-        if (GUILayout.Button("Update Registry"))
-        {
-            Debug.Log("Updating registries...");
-            BundledResourceBuilder.UpdateRegistries(false);
-            Debug.Log("Updating registries done");
-        }
 
         GUILayout.Label("Bundles (" + PrettyPrintTimeStamp(TimeLastBuildBundles()) + ")", EditorStyles.boldLabel);
 
         var buildBundledLevels = false;
         var buildBundledAssets = false;
-        var forceBuildBundles = false;
         List<LevelInfo> buildOnlyLevels = null;
+
+        GUILayout.BeginHorizontal();
         s_SingleLevelBuilding = EditorGUILayout.Toggle("Single level building", s_SingleLevelBuilding);
+        
+        // TODO (mogensh) We always force bundle build until we are sure non-forced works         
+        // s_ForceBuildBundles = EditorGUILayout.Toggle("Force Build Bundles", s_ForceBuildBundles);
+
+        GUILayout.EndHorizontal();
+
         if (s_SingleLevelBuilding)
         {
             GUILayout.BeginVertical();
             foreach (var l in m_LevelInfos)
             {
-                if (GUILayout.Button("Build only: " + l.name + " [force]"))
+                if (GUILayout.Button("Build only: " + l.name + (s_ForceBuildBundles ? " [force]" : "")))
                 {
                     buildBundledLevels = true;
-                    forceBuildBundles = true;
                     buildOnlyLevels = new List<LevelInfo>();
                     buildOnlyLevels.Add(l);
                     break;
@@ -256,29 +275,27 @@ public class BuildWindow : EditorWindow
             }
             GUILayout.EndHorizontal();
         }
+
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Levels [force]"))
+        if (GUILayout.Button("Levels" + (s_ForceBuildBundles ? " [force]" : "")))
         {
             buildBundledLevels = true;
-            forceBuildBundles = true;
         }
-        if (GUILayout.Button("Assets [force]"))
+        if (GUILayout.Button("Assets" + (s_ForceBuildBundles ? " [force]" : "")))
         {
             buildBundledAssets = true;
-            forceBuildBundles = true;
         }
-        if (GUILayout.Button("All [force]"))
+        if (GUILayout.Button("All" + (s_ForceBuildBundles ? " [force]" : "")))
         {
             buildBundledLevels = true;
             buildBundledAssets = true;
-            forceBuildBundles = true;
         }
         GUILayout.EndHorizontal();
 
         var buildTarget = EditorUserBuildSettings.activeBuildTarget;    // BuildTarget.StandaloneWindows64
         if (buildBundledLevels || buildBundledAssets)
         {
-            BuildTools.BuildBundles(GetBundlePath(buildTarget), buildTarget, buildBundledAssets, buildBundledLevels, forceBuildBundles, buildOnlyLevels);
+            BuildTools.BuildBundles(GetBundlePath(buildTarget), buildTarget, buildBundledAssets, buildBundledLevels, s_ForceBuildBundles, buildOnlyLevels);
             if (buildTarget == BuildTarget.PS4)
             {
                 // Copy the asset bundles into the PS4 game folder too
@@ -304,7 +321,7 @@ public class BuildWindow : EditorWindow
 
         m_IL2CPP = EditorGUILayout.Toggle("IL2CPP", m_IL2CPP);
         m_AllowDebugging = EditorGUILayout.Toggle("Allow debugging", m_AllowDebugging);
-            
+
         var m_RunArguments = EditorPrefTextField("Arguments", "RunArguments");
 
         GUILayout.BeginHorizontal();
@@ -322,7 +339,7 @@ public class BuildWindow : EditorWindow
         {
             StopAll();
 
-            var buildOptions = m_AllowDebugging ? BuildOptions.AllowDebugging : BuildOptions.None; 
+            var buildOptions = m_AllowDebugging ? BuildOptions.AllowDebugging : BuildOptions.None;
             if (buildOnlyScripts)
                 buildOptions |= BuildOptions.BuildScriptsOnly;
 
@@ -533,6 +550,15 @@ public class BuildWindow : EditorWindow
         EditorApplication.isPlaying = false;
     }
 
+    GUIContent TooltipContent(string text, string tooltip)
+    {
+        var content = new GUIContent
+        {
+            text = text,
+            tooltip = tooltip,
+        };
+        return content;
+    }
 
     static string EditorPrefTextField(string label, string editorPrefKey)
     {
@@ -543,14 +569,14 @@ public class BuildWindow : EditorWindow
         return str;
     }
 
-    static void RunBuild(string args)
+    public static void RunBuild(string args)
     {
         var buildTarget = EditorUserBuildSettings.activeBuildTarget;
         var buildPath = GetBuildPath(buildTarget);
         var buildExe = GetBuildExe(buildTarget);
-        Debug.Log("Starting " + buildExe + " in " + buildPath);
+        Debug.Log("Starting " + buildPath + "/" + buildExe + " " + args);
         var process = new System.Diagnostics.Process();
-        process.StartInfo.UseShellExecute = false;
+        process.StartInfo.UseShellExecute = args.Contains("-batchmode");
         process.StartInfo.FileName = Application.dataPath + "/../" + buildPath + "/" + buildExe;    // mogensh: for some reason we now need to specify project path
         process.StartInfo.Arguments = args;
         process.StartInfo.WorkingDirectory = buildPath;
@@ -605,10 +631,17 @@ public class BuildWindow : EditorWindow
         }
     }
 
+    static string GetAssetBundleFolder()
+    {
+        return GetBundlePath(EditorUserBuildSettings.activeBuildTarget) + "/" + SimpleBundleManager.assetBundleFolder;
+    }
+
     static DateTime TimeLastBuildBundles()
     {
-        return Directory.GetLastWriteTime(GetBundlePath(EditorUserBuildSettings.activeBuildTarget) + "/" + SimpleBundleManager.assetBundleFolder);
+        return Directory.GetLastWriteTime(GetAssetBundleFolder());
     }
+    
+    
 
     static DateTime TimeLastBuildGame()
     {
@@ -684,5 +717,8 @@ public class BuildWindowProgress : EditorWindow
         GUILayout.Label(text, style);
         GUILayout.EndScrollView();
     }
+    
+
+
 }
 

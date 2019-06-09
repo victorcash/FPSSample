@@ -1,8 +1,10 @@
 ﻿using System;
+using UnityEditor;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [CreateAssetMenu(fileName = "HeroType", menuName = "FPS Sample/Hero/HeroType")]
-public class HeroTypeAsset : ScriptableObject 
+public class HeroTypeAsset : ScriptableObject
 {
     [Serializable]
     public class ItemEntry
@@ -20,7 +22,12 @@ public class HeroTypeAsset : ScriptableObject
     
     public float health = 100;
     public SprintCameraSettings sprintCameraSettings = new SprintCameraSettings();
+    public float eyeHeight = 1.8f;
+    public CharacterMoveQuery.Settings characterMovementSettings;
+    
+    [AssetType(typeof(ReplicatedEntityFactory))]
+    public WeakAssetReference abilities;
+    
     public CharacterTypeDefinition character;
     public ItemEntry[] items;
-    public WeakAssetReference[] abilities;
 }

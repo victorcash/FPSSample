@@ -2,6 +2,7 @@
 using UnityEngine;
 using UnityEngine.Animations;
 using UnityEngine.Playables;
+using UnityEngine.Profiling;
 
 [CreateAssetMenu(fileName = "Simple", menuName = "FPS Sample/Animation/AnimGraph/Simple")]
 public class AnimGraph_Simple : AnimGraphAsset
@@ -13,17 +14,19 @@ public class AnimGraph_Simple : AnimGraphAsset
 
     public ActionAnimationDefinition[] actionAnimations;
 
-    public override IAnimGraphInstance Instatiate(EntityManager entityManager, Entity owner, PlayableGraph graph)
+    public override IAnimGraphInstance Instatiate(EntityManager entityManager, Entity owner, PlayableGraph graph,
+        Entity animStateOwner)
     {
-        return new Instance(entityManager, owner, graph, this);
+        return new Instance(entityManager, owner, graph, animStateOwner, this);
     }
         
     class Instance : IAnimGraphInstance, IGraphState
     {
-        public Instance(EntityManager entityManager, Entity owner, PlayableGraph graph, AnimGraph_Simple settings)
+        public Instance(EntityManager entityManager, Entity owner, PlayableGraph graph, Entity animStateOwner, AnimGraph_Simple settings)
         {
             m_EntityManager = entityManager;
             m_Owner = owner;
+            m_AnimStateOwner = animStateOwner;
             
             m_layerMixer = AnimationLayerMixerPlayable.Create(graph);
             int port;
@@ -61,30 +64,39 @@ public class AnimGraph_Simple : AnimGraphAsset
     
         public void UpdatePresentationState(bool firstUpdate, GameTime time, float deltaTime)
         {
-            var animState = m_EntityManager.GetComponentData<CharAnimState>(m_Owner);
+            Profiler.BeginSample("Simple.Update");
+            
+            var animState = m_EntityManager.GetComponentData<CharacterInterpolatedData>(m_AnimStateOwner);
             animState.rotation = animState.aimYaw;
 
             if (firstUpdate)
                 animState.simpleTime = 0;
             else
                 animState.simpleTime += deltaTime;
-            m_EntityManager.SetComponentData(m_Owner, animState);
+            m_EntityManager.SetComponentData(m_AnimStateOwner, animState);
+            
+            Profiler.EndSample();
         }
 
         public void ApplyPresentationState(GameTime time, float deltaTime)
         {
-            var animState = m_EntityManager.GetComponentData<CharAnimState>(m_Owner);
+            Profiler.BeginSample("Simple.Apply");
+
+            var animState = m_EntityManager.GetComponentData<CharacterInterpolatedData>(m_AnimStateOwner);
             m_animIdle.SetTime(animState.simpleTime);
             
             var characterActionDuration = time.DurationSinceTick(animState.charActionTick);
             m_actionAnimationHandler.UpdateAction(animState.charAction, characterActionDuration);
             if(m_aimHandler != null)
                 m_aimHandler.SetAngle(animState.aimPitch);
+            
+            Profiler.EndSample();
         }
     
         
         EntityManager m_EntityManager;
         Entity m_Owner;
+        Entity m_AnimStateOwner;
         AnimationLayerMixerPlayable m_layerMixer;
         AnimationClipPlayable m_animIdle;
         AnimationLayerMixerPlayable m_actionMixer;

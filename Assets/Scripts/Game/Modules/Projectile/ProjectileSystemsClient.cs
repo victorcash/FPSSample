@@ -47,9 +47,9 @@ public class HandleClientProjectileRequests : BaseComponentSystem
         m_clientProjectileFactory = clientProjectileFactory;
     }
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
+        base.OnCreateManager();
         RequestGroup = GetComponentGroup(typeof(ProjectileRequest));
     }
 
@@ -75,25 +75,37 @@ public class HandleClientProjectileRequests : BaseComponentSystem
         }
 
         // Handle requests
+        var projectileRegistry = m_resourceSystem.GetResourceRegistry<ProjectileRegistry>();
         foreach (var request in requestBuffer)
         {
+            var registryIndex = projectileRegistry.FindIndex(request.projectileAssetGuid);
+            if (registryIndex == -1)
+            {
+                GameDebug.LogError("Cant find asset guid in registry");
+                continue;
+            }
+
             // Create projectile and initialize
-            var projectileEntity = m_settings.projectileFactory.Create(EntityManager);
+            var projectileEntity = m_settings.projectileFactory.Create(EntityManager, m_resourceSystem, m_world);
             var projectileData = EntityManager.GetComponentData<ProjectileData>(projectileEntity);
-            projectileData.Initialize(request);
-            projectileData.LoadSettings( m_resourceSystem);
-            EntityManager.SetComponentData(projectileEntity, projectileData);
             
+            projectileData.SetupFromRequest(request, registryIndex);
+            projectileData.Initialize( projectileRegistry);
+            EntityManager.SetComponentData(projectileEntity, projectileData);
+            EntityManager.AddComponentData(projectileEntity, new PredictedProjectile(request.startTick));
+            EntityManager.AddComponentData(projectileEntity, new UpdateProjectileFlag());
+
             if (ProjectileModuleClient.logInfo.IntValue > 0)
                 GameDebug.Log("New predicted projectile created: " + projectileEntity);
-            
-            // Add components so projectile is picked by prediction code
-            EntityManager.AddComponentData(projectileEntity, new ServerEntity());
-            EntityManager.AddComponentData(projectileEntity, new PredictedProjectile(request.startTick));
-            
-            // Create client projectile and add ServerEntity so it will use predicted time
+
+            // Create client projectile
             var clientProjectileEntity = m_clientProjectileFactory.CreateClientProjectile(projectileEntity);
-            EntityManager.AddComponentData(clientProjectileEntity, new ServerEntity());
+            EntityManager.AddComponentData(clientProjectileEntity, new UpdateProjectileFlag());
+            
+            if (ProjectileModuleClient.drawDebug.IntValue == 1)
+            {
+                Debug.DrawLine(projectileData.startPos, projectileData.endPos, Color.cyan, 1.0f);
+            }
         }
     }
 }
@@ -148,7 +160,7 @@ class ProjectilesSystemsClient
 
             if (clientProjectile.impactEffect != null)
             {
-                SpatialEffectRequest.Create(commandBuffer, clientProjectile.impactEffect, 
+                world.GetECSWorld().GetExistingManager<HandleSpatialEffectRequests>().Request(clientProjectile.impactEffect, 
                     projectileData.impactPos, Quaternion.LookRotation(projectileData.impactNormal));
             }
 
@@ -178,7 +190,7 @@ public class UpdateClientProjectilesPredicted : BaseComponentSystem<ClientProjec
 {
     public UpdateClientProjectilesPredicted(GameWorld world) : base(world)
     {
-        ExtraComponentRequirements = new [] { ComponentType.Create<ServerEntity>() };
+        ExtraComponentRequirements = new [] { ComponentType.Create<UpdateProjectileFlag>() };
     }
 
     protected override void Update(Entity entity, ClientProjectile clientProjectile)
@@ -192,7 +204,7 @@ public class UpdateClientProjectilesNonPredicted : BaseComponentSystem<ClientPro
 {
     public UpdateClientProjectilesNonPredicted(GameWorld world) : base(world)
     {
-        ExtraComponentRequirements = new [] { ComponentType.Subtractive<ServerEntity>() };
+        ExtraComponentRequirements = new [] { ComponentType.Subtractive<UpdateProjectileFlag>() };
     }
 
     protected override void Update(Entity entity, ClientProjectile clientProjectile)
@@ -222,9 +234,9 @@ public class HandleProjectileSpawn : BaseComponentSystem
         m_clientProjectileFactory = projectileFactory;
     }
     
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
+        base.OnCreateManager();
 
         
         PredictedProjectileGroup = GetComponentGroup(typeof(ProjectileData), typeof(PredictedProjectile), ComponentType.Subtractive<DespawningEntity>());
@@ -260,7 +272,8 @@ public class HandleProjectileSpawn : BaseComponentSystem
 //            var inProjectileEntity = inProjectile.GetComponent<GameObjectEntity>().Entity;
 
             // Initialze new projectile with correct settings
-            inProjectileData.LoadSettings( m_resourceSystem);
+            var projectileRegistry = m_resourceSystem.GetResourceRegistry<ProjectileRegistry>();
+            inProjectileData.Initialize( projectileRegistry);
             m_world.GetEntityManager().SetComponentData(inProjectileEntity, inProjectileData);
             
             // I new projectile in not predicted, attempt to find a predicted that that should link to it 
@@ -272,14 +285,16 @@ public class HandleProjectileSpawn : BaseComponentSystem
                     var predictedProjetile = predictedProjectileArray[i];
                     
                     // Attempt to find matching 
-                    if (predictedProjetile.projectileTypeRegistryId !=
-                        inProjectileData.projectileTypeRegistryId)
+                    if (predictedProjetile.projectileTypeRegistryIndex !=
+                        inProjectileData.projectileTypeRegistryIndex)
                         continue;
                     if (predictedProjetile.projectileOwner != inProjectileData.projectileOwner)
                         continue;
                     if (predictedProjetile.startTick != inProjectileData.startTick)
                         continue;
                     if (math.distance(predictedProjetile.startPos, inProjectileData.startPos) > 0.1f)
+                        continue;
+                    if (math.distance(predictedProjetile.endPos, inProjectileData.endPos) > 0.1f)
                         continue;
 
                     // Match found
@@ -296,13 +311,15 @@ public class HandleProjectileSpawn : BaseComponentSystem
                         EntityManager.GetComponentObject<ClientProjectile>(clientProjectileOwner.clientProjectile);
                     clientProjectile.projectile = inProjectileEntity;
                     PostUpdateCommands.AddComponent(inProjectileEntity,clientProjectileOwner);
-                    PostUpdateCommands.RemoveComponent(predictedProjectileEntity,typeof(ClientProjectileOwner));
-
+                    PostUpdateCommands.AddComponent(inProjectileEntity, new UpdateProjectileFlag());
+                    
                     // Destroy predicted
                     if (ProjectileModuleClient.logInfo.IntValue > 0)
                         GameDebug.Log("ProjectileSystemClient. Destroying predicted:" + predictedProjectileEntity);
-                    
-                    PostUpdateCommands.AddComponent(predictedProjectileEntity, new DespawningEntity());
+
+                    PostUpdateCommands.RemoveComponent(predictedProjectileEntity,typeof(ClientProjectileOwner));
+                    PostUpdateCommands.RemoveComponent(predictedProjectileEntity,typeof(UpdateProjectileFlag));
+                    m_world.RequestDespawn(PostUpdateCommands, predictedProjectileEntity);
                     break;
                 }
             }
@@ -311,7 +328,7 @@ public class HandleProjectileSpawn : BaseComponentSystem
             {
                 var color = matchFound ? Color.green : Color.yellow;
                 DebugDraw.Sphere(inProjectileData.startPos, 0.12f, color, 1.0f);
-                Debug.DrawLine(inProjectileData.startPos, inProjectileData.startPos + inProjectileData.endPos, color, 1.0f);
+                Debug.DrawLine(inProjectileData.startPos, inProjectileData.endPos, color, 1.0f);
             }
             
             // If match was found the new projectile has already been assigned an existing clientprojectile
@@ -345,9 +362,9 @@ public class RemoveMispredictedProjectiles : BaseComponentSystem
         base(world)
     {}
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
+        base.OnCreateManager();
         PredictedProjectileGroup = GetComponentGroup(typeof(PredictedProjectile), ComponentType.Subtractive<DespawningEntity>());
     }
 
@@ -389,9 +406,9 @@ public class DespawnClientProjectiles : BaseComponentSystem
         m_clientProjectileFactory = clientProjectileFactory;
     }
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
+        base.OnCreateManager();
 
         DespawningClientProjectileOwnerGroup = GetComponentGroup(typeof(ClientProjectileOwner), typeof(DespawningEntity));
     }
@@ -441,14 +458,14 @@ public class ClientProjectileFactory
         m_systemRoot = systemRoot;
 
         var projectileRegistry = m_resourceSystem.GetResourceRegistry<ProjectileRegistry>();
-        var typeCount = projectileRegistry.entries.Length;
+        var typeCount = projectileRegistry.entries.Count;
         pools = new Pool[typeCount];
-        for (var i = 0; i < projectileRegistry.entries.Length; i++)
+        for (var i = 0; i < projectileRegistry.entries.Count; i++)
         {
             var pool = new Pool();
             
             var entry = projectileRegistry.entries[i];
-            pool.prefab = (GameObject)m_resourceSystem.LoadSingleAssetResource(entry.definition.clientProjectilePrefab.guid);
+            pool.prefab = (GameObject)m_resourceSystem.GetSingleAssetResource(entry.definition.clientProjectilePrefab);
             pool.poolIndex = i;            
             Allocate(pool, entry.definition.clientProjectileBufferSize);
             pools[i] = pool;
@@ -504,11 +521,7 @@ public class ClientProjectileFactory
         var projectileData = m_entityManager.GetComponentData<ProjectileData>(projectileEntity);
 
         // Create client projectile
-        var projectileRegistry = m_resourceSystem.GetResourceRegistry<ProjectileRegistry>();
-        var index = projectileRegistry.GetIndexByRegistryId(projectileData.projectileTypeRegistryId);
-        GameDebug.Assert(index != -1,"Failed to create projectile data. Cant find projectileType:{0} in registry",projectileData.projectileTypeRegistryId);
-
-        var pool = pools[index];
+        var pool = pools[projectileData.projectileTypeRegistryIndex];
         var instanceIndex = Reserve(pool);
         var gameObjectEntity = pool.instances[instanceIndex];
         gameObjectEntity.gameObject.SetActive(true);

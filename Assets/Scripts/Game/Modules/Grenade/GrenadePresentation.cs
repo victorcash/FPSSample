@@ -1,54 +1,46 @@
-﻿using System;
-using System.Collections.Generic;
+﻿#if UNITY_EDITOR
+using System;
+using UnityEditor;
+#endif
 using UnityEngine;
 
-public class GrenadePresentation : MonoBehaviour, INetworkSerializable
+[RequireComponent(typeof(PresentationEntity))]
+public class GrenadePresentation : MonoBehaviour
 {
-    public struct State
-    {
-        public Vector3 position;
-        public bool exploded;
-        public int bouncetick;
+}
 
-        public void Serialize(ref NetworkWriter writer)
-        {
-            writer.WriteVector3("position", position);
-            writer.WriteBoolean("exploded", exploded);
-            writer.WriteInt32("bouncetick", bouncetick);
-        }
 
-        public void Deserialize(ref NetworkReader reader)
-        {
-            position = reader.ReadVector3();
-            exploded = reader.ReadBoolean();
-            bouncetick = reader.ReadInt32();
-        }
+// Project specific
+enum PlatformFlag
+{
+    Server = 1 << 0,
+    ClientPC = 1 << 1,
+}
 
-        public void Interpolate(ref State prevState, ref State nextState, float f)
-        {
-            position = Vector3.Lerp(prevState.position, nextState.position, f);
-            exploded = nextState.exploded;
-            bouncetick = nextState.bouncetick;
-        }
-    }
-    
-    public State state;
-    public TickStateSparseBuffer<State> stateHistory = new TickStateSparseBuffer<State>(32);
-
-    public void Serialize(ref NetworkWriter writer, IEntityReferenceSerializer refSerializer)
-    {
-        state.Serialize(ref writer);
-    }
-
-    public void Deserialize(ref NetworkReader reader, IEntityReferenceSerializer refSerializer, int tick)
-    {
-        var state = new State();
-        state.Deserialize(ref reader);
-        
-        stateHistory.Add(tick, state);
 
 #if UNITY_EDITOR
-        StateHistory.SetState(this, tick, ref state);
-#endif
+[CustomEditor(typeof(GrenadePresentation))]
+public class GrenadePresentationEditor : Editor
+{
+    public override void OnInspectorGUI()
+    {
+        var grenadePresentation = target as GrenadePresentation;
+
+        var presentation = grenadePresentation.GetComponent<PresentationEntity>();
+        
+        var serializedPresentation = new SerializedObject(presentation);
+        
+        var presentationOwner = serializedPresentation.FindProperty("presentationOwner");
+        EditorGUILayout.PropertyField(presentationOwner);
+
+        var platformFlags = serializedPresentation.FindProperty("platformFlags");
+        var names = Enum.GetNames(typeof(PlatformFlag));
+        platformFlags.intValue = EditorGUILayout.MaskField("Platforms", platformFlags.intValue, names );
+
+        var variation = serializedPresentation.FindProperty("variation");
+        EditorGUILayout.PropertyField(variation);
+        
+        serializedPresentation.ApplyModifiedProperties();
     }
 }
+#endif

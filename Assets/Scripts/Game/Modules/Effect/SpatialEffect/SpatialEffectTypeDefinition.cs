@@ -1,21 +1,28 @@
-﻿using System.Collections.Generic;
+﻿using System;
 using UnityEngine;
+using UnityEngine.Experimental.VFX;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [CreateAssetMenu(fileName = "SpatialEffectTypeDefinition", menuName = "FPS Sample/Effect/SpatialEffectTypeDefinition")]
-public class SpatialEffectTypeDefinition : DynamicEnum
+public class SpatialEffectTypeDefinition : ScriptableObject
 {
-    public WeakAssetReference prefab;
-    public int poolSize = 16;
+    [Header("Visual Effect")]
+    [Tooltip("Impact Effect template used by VFXImpactManager")]
+    public VisualEffectAsset effect;
+
+    public SoundDef sound;
     
-#if UNITY_EDITOR
-    public override void GetAssetReferences(List<string> guids, bool server)
+    [Serializable]
+    public class ShockwaveSettings
     {
-        if (server)
-            return;
-
-        if (prefab != null)
-            guids.Add(prefab.guid);
+        public bool enabled;
+        public float force = 7;
+        public float radius = 5;
+        public float upwardsModifier = 0.0f;
+        public ForceMode mode = ForceMode.Impulse;
     }
-#endif
-}
 
+    public ShockwaveSettings shockwave;
+}

@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Unity.Entities;
 using UnityEngine;
 
@@ -6,20 +7,19 @@ public class ClientFrontend : MonoBehaviour
 {
     public ScoreBoard scoreboardPanel;
     public GameScore gameScorePanel;
-    public CountDown countDownPanel;
-    public MainMenu mainMenu;
+    [SerializeField] MainMenu mainMenu;
     public ChatPanel chatPanel;
     public ServerPanel serverPanel;
+
     public bool m_ShowScorePanel;
 
-    public SoundDef uiHighlightSound;
-    public SoundDef uiSelectSound;
-    public SoundDef uiSelectLightSound;
-    public SoundDef uiCloseSound;
+    [SerializeField] SoundDef uiHighlightSound;
+    [SerializeField] SoundDef uiSelectSound;
+    [SerializeField] SoundDef uiSelectLightSound;
+    [SerializeField] SoundDef uiCloseSound;
 
     Canvas m_ScoreboardPanelCanvas;
     Canvas m_GameScorePanelCanvas;
-    Canvas m_CountDownPanelCanvas;
     Canvas m_ChatPanelCanvas;
 
     public enum MenuShowing
@@ -33,6 +33,12 @@ public class ClientFrontend : MonoBehaviour
 
     public MenuShowing menuShowing { get; private set; } = MenuShowing.None;
 
+    public int ActiveMainMenuNumber
+    {
+        get { return mainMenu.gameObject.activeSelf ? mainMenu.activeSubmenuNumber : -1; }
+    }
+
+
     // Audio for menus. Called from events on the ui elements
     public void OnHighlight() { Game.SoundSystem.Play(uiHighlightSound); }
     public void OnSelect() { Game.SoundSystem.Play(uiSelectSound); }
@@ -42,7 +48,6 @@ public class ClientFrontend : MonoBehaviour
     {
         m_ScoreboardPanelCanvas = scoreboardPanel.GetComponent<Canvas>();
         m_GameScorePanelCanvas = gameScorePanel.GetComponent<Canvas>();
-        m_CountDownPanelCanvas = countDownPanel.GetComponent<Canvas>();
         m_ChatPanelCanvas = chatPanel.GetComponent<Canvas>();
         Clear();
     }
@@ -51,9 +56,9 @@ public class ClientFrontend : MonoBehaviour
     {
         scoreboardPanel.SetPanelActive(false);
         gameScorePanel.SetPanelActive(false);
-        countDownPanel.SetPanelActive(false);
         mainMenu.SetPanelActive(MenuShowing.None);
         chatPanel.SetPanelActive(true); // active always as it has its own display/hide logic
+        chatPanel.ClearMessages();
         serverPanel.SetPanelActive(false);
     }
 
@@ -71,13 +76,14 @@ public class ClientFrontend : MonoBehaviour
 
     public void UpdateGame()
     {
+        mainMenu.UpdateMenus();
+
         // Show/Hide fully for debug purposes
         var show = IngameHUD.showHud.IntValue > 0;
         if (m_ChatPanelCanvas.enabled != show)
         {
             m_ScoreboardPanelCanvas.enabled = show;
             m_GameScorePanelCanvas.enabled = show;
-            m_CountDownPanelCanvas.enabled = show;
             m_ChatPanelCanvas.enabled = show;
         }
 
@@ -92,7 +98,6 @@ public class ClientFrontend : MonoBehaviour
                     Console.EnqueueCommandNoHistory("menu 1 0.2");
                 else
                     Console.EnqueueCommandNoHistory("menu 2 0.2");
-                GameDebug.Log("lvl: " + Game.game.levelManager.currentLevel.name);
             }
             else
             {
@@ -110,12 +115,6 @@ public class ClientFrontend : MonoBehaviour
             mainMenu.SetAlpha(fade);
     }
 
-    public void UpdateMenu(string playerName, IList<ServerInfo> serverInfos, string gameMessage)
-    {
-        if (mainMenu.GetPanelActive())
-            mainMenu.UpdateInfo(playerName, serverInfos, gameMessage);
-    }
-
     public void UpdateChat(ChatSystemClient chatSystem)
     {
         chatPanel.Tick(chatSystem);
@@ -131,13 +130,8 @@ public class ClientFrontend : MonoBehaviour
     {
         var playerState = localPlayer.playerState;
 
-        // Countdown
-        countDownPanel.SetPanelActive(playerState.displayCountDown);
-        if (playerState.displayCountDown)
-            countDownPanel.levelInfoCounter.Format("{0}", playerState.countDown);
-
         // Scoreboard
-        scoreboardPanel.SetPanelActive(!playerState.displayCountDown && (playerState.displayScoreBoard || Game.Input.GetKey(KeyCode.Tab) || m_ShowScorePanel));
+        scoreboardPanel.SetPanelActive(playerState.displayScoreBoard || Game.Input.GetKey(KeyCode.Tab) || m_ShowScorePanel);
 
         // Game score panel
         gameScorePanel.SetPanelActive(playerState.displayGameScore);
@@ -153,9 +147,9 @@ class ClientFrontendUpdate : BaseComponentSystem
     {
     }
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
+        base.OnCreateManager();
         m_gameModeGroup = GetComponentGroup(typeof(GameMode));
         m_localPlayerGroup = GetComponentGroup(typeof(LocalPlayer));
     }

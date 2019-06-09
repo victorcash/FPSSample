@@ -11,10 +11,11 @@ public class CreateProjectileMovementCollisionQueries : BaseComponentSystem
 
     public CreateProjectileMovementCollisionQueries(GameWorld world) : base(world) { }
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
-        ProjectileGroup = GetComponentGroup(typeof(ServerEntity), typeof(ProjectileData));
+        base.OnCreateManager();
+        ProjectileGroup = GetComponentGroup(typeof(UpdateProjectileFlag), typeof(ProjectileData), 
+            ComponentType.Subtractive<DespawningEntity>());
     }
 
     protected override void OnUpdate()
@@ -27,12 +28,8 @@ public class CreateProjectileMovementCollisionQueries : BaseComponentSystem
             var projectileData = projectileDataArray[i];
             if (projectileData.impactTick > 0)
                 continue;
-            
-            if (!EntityManager.HasComponent<ReplicatedEntity>(projectileData.projectileOwner) &&
-                !EntityManager.HasComponent<ReplicatedDataEntity>(projectileData.projectileOwner))
-            {
-                GameDebug.LogError("Owner has no rep component 4. Owner:" + projectileData.projectileOwner);
-            }
+
+            var entity = entityArray[i];
 
             var collisionTestTick = time.tick - projectileData.collisionCheckTickDelay;
 
@@ -43,7 +40,7 @@ public class CreateProjectileMovementCollisionQueries : BaseComponentSystem
             var newPosition = (Vector3)projectileData.startPos + dir * totalMoveDist;
             var moveDist = math.distance(projectileData.position, newPosition);
 
-            var collisionMask = ~(1 << projectileData.teamId);
+            var collisionMask = ~(1U << projectileData.teamId);
 
             var queryReciever = World.GetExistingManager<RaySphereQueryReciever>();
             projectileData.rayQueryId = queryReciever.RegisterQuery(new RaySphereQueryReciever.Query()
@@ -52,12 +49,11 @@ public class CreateProjectileMovementCollisionQueries : BaseComponentSystem
                 origin = projectileData.position,
                 direction = dir,
                 distance = moveDist,
-                sphereCastRadius = projectileData.settings.collisionRadius,
-                testAgainsEnvironment = 1,
-                sphereCastMask = collisionMask,
-                sphereCastExcludeOwner = projectileData.projectileOwner,
+                radius = projectileData.settings.collisionRadius,
+                mask = collisionMask,
+                ExcludeOwner = projectileData.projectileOwner,
             });
-            PostUpdateCommands.SetComponent(entityArray[i],projectileData);
+            PostUpdateCommands.SetComponent(entity,projectileData);
         }
     }
 }
@@ -69,10 +65,11 @@ public class HandleProjectileMovementCollisionQuery : BaseComponentSystem
 
     public HandleProjectileMovementCollisionQuery(GameWorld world) : base(world) { }
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
-        ProjectileGroup = GetComponentGroup(typeof(ServerEntity), typeof(ProjectileData));
+        base.OnCreateManager();
+        ProjectileGroup = GetComponentGroup(typeof(UpdateProjectileFlag), typeof(ProjectileData), 
+            ComponentType.Subtractive<DespawningEntity>());
     }
     
     protected override void OnUpdate()
@@ -88,33 +85,33 @@ public class HandleProjectileMovementCollisionQuery : BaseComponentSystem
                 continue;
             
             RaySphereQueryReciever.Query query;
-            RaySphereQueryReciever.Result result;
-            queryReciever.GetResult(projectileData.rayQueryId, out query, out result);
+            RaySphereQueryReciever.QueryResult queryResult;
+            queryReciever.GetResult(projectileData.rayQueryId, out query, out queryResult);
             
             var projectileVec = projectileData.endPos - projectileData.startPos;
             var projectileDir = Vector3.Normalize(projectileVec);
             var newPosition = (Vector3)projectileData.position + projectileDir * query.distance;
 
-            var impact = result.hit == 1;
+            var impact = queryResult.hit == 1;
             if (impact)
             {
                 projectileData.impacted = 1;
-                projectileData.impactPos = result.hitPoint;
-                projectileData.impactNormal = result.hitNormal;
+                projectileData.impactPos = queryResult.hitPoint;
+                projectileData.impactNormal = queryResult.hitNormal;
                 projectileData.impactTick = m_world.worldTime.tick;
 
-                var damageInstigator = projectileData.projectileOwner;
-                //                GameDebug.Assert(damageInstigator == Entity.Null || !EntityManager.Exists(damageInstigator) || EntityManager.HasComponent<Character>(damageInstigator),"Damage instigator is not a character");
+                // Owner can despawn while projectile is in flight, so we need to make sure we dont send non existing instigator
+                var damageInstigator = EntityManager.Exists(projectileData.projectileOwner) ? projectileData.projectileOwner : Entity.Null;
 
-                var collisionHit = result.hitCollisionOwner != Entity.Null;
+                var collisionHit = queryResult.hitCollisionOwner != Entity.Null;
                 if (collisionHit)
                 {
                     if (damageInstigator != Entity.Null)
                     {
-                        if (EntityManager.HasComponent<HitCollisionOwner>(result.hitCollisionOwner))
+                        if (EntityManager.HasComponent<DamageEvent>(queryResult.hitCollisionOwner))
                         {
-                            var hitCollisionOwner = EntityManager.GetComponentObject<HitCollisionOwner>(result.hitCollisionOwner);
-                            hitCollisionOwner.damageEvents.Add(new DamageEvent(damageInstigator, projectileData.settings.impactDamage, projectileDir, projectileData.settings.impactImpulse));   
+                            var damageEventBuffer = EntityManager.GetBuffer<DamageEvent>(queryResult.hitCollisionOwner);
+                            DamageEvent.AddEvent(damageEventBuffer, damageInstigator, projectileData.settings.impactDamage, projectileDir, projectileData.settings.impactImpulse);
                         }
                     }
                 }
@@ -124,11 +121,11 @@ public class HandleProjectileMovementCollisionQuery : BaseComponentSystem
                     if (damageInstigator != Entity.Null)
                     {
                         var collisionMask = ~(1 << projectileData.teamId);
-                        SplashDamageRequest.Create(PostUpdateCommands, query.hitCollisionTestTick, damageInstigator, result.hitPoint, collisionMask, projectileData.settings.splashDamage);
+                        SplashDamageRequest.Create(PostUpdateCommands, query.hitCollisionTestTick, damageInstigator, queryResult.hitPoint, collisionMask, projectileData.settings.splashDamage);
                     }
                 }
 
-                newPosition = result.hitPoint;
+                newPosition = queryResult.hitPoint;
             }
 
             if (ProjectileModuleServer.drawDebug.IntValue == 1)
@@ -152,9 +149,9 @@ public class DespawnProjectiles : BaseComponentSystem
 
     public DespawnProjectiles(GameWorld world) : base(world) { }
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
+        base.OnCreateManager();
         ProjectileGroup = GetComponentGroup(typeof(ProjectileData));
     }
     

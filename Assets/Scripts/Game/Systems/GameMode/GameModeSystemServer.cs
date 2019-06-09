@@ -63,7 +63,7 @@ public class GameModeSystemServer : ComponentSystem
         m_Settings = Resources.Load<GameModeSystemSettings>("GameModeSystemSettings");
 
         // Create game mode state
-        var prefab = (GameObject)resourceSystem.LoadSingleAssetResource(m_Settings.gameModePrefab.guid);
+        var prefab = (GameObject)resourceSystem.GetSingleAssetResource(m_Settings.gameModePrefab);
         gameModeState = m_World.Spawn<GameMode>(prefab);
 
     }
@@ -110,9 +110,9 @@ public class GameModeSystemServer : ComponentSystem
         m_World.RequestDespawn(gameModeState.gameObject);
     }
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
+        base.OnCreateManager();
         playersComponentGroup = GetComponentGroup(typeof(PlayerState));
         m_TeamBaseComponentGroup = GetComponentGroup(typeof(TeamBase));
         m_SpawnPointComponentGroup = GetComponentGroup(typeof(SpawnPoint));
@@ -197,6 +197,7 @@ public class GameModeSystemServer : ComponentSystem
             var controlledEntity = player.controlledEntity;
             var playerEntity = playerEntities[i];
 
+            
             player.actionString = player.enableCharacterSwitch ? "Press H to change character" : "";
 
             var charControl = playerCharacterControls[i];
@@ -206,7 +207,8 @@ public class GameModeSystemServer : ComponentSystem
             {
                 var position = new Vector3(0.0f, 0.2f, 0.0f);
                 var rotation = Quaternion.identity;
-
+                GetRandomSpawnTransform(player.teamIndex, ref position, ref rotation);
+                
                 m_GameMode.OnPlayerRespawn(player, ref position, ref rotation);
 
                 if (charControl.characterType == -1)
@@ -236,13 +238,13 @@ public class GameModeSystemServer : ComponentSystem
                     {
 
                         // Despawn current controlled entity. New entity will be created later
-                        if (EntityManager.HasComponent<CharacterPredictedState>(controlledEntity))
+                        if (EntityManager.HasComponent<Character>(controlledEntity))
                         {
-                            var cps = EntityManager.GetComponentObject<CharacterPredictedState>(controlledEntity);
-                            var rotation = cps.State.velocity.magnitude > 0.01f ? Quaternion.LookRotation(cps.State.velocity.normalized) : Quaternion.identity;
+                            var predictedState = EntityManager.GetComponentData<CharacterPredictedData>(controlledEntity);
+                            var rotation = predictedState.velocity.magnitude > 0.01f ? Quaternion.LookRotation(predictedState.velocity.normalized) : Quaternion.identity;
 
                             CharacterDespawnRequest.Create(PostUpdateCommands, controlledEntity);
-                            CharacterSpawnRequest.Create(PostUpdateCommands, charControl.characterType, cps.State.position, rotation, playerEntity);
+                            CharacterSpawnRequest.Create(PostUpdateCommands, charControl.characterType, predictedState.position, rotation, playerEntity);
                         }
                         player.controlledEntity = Entity.Null;
                     }
@@ -251,16 +253,16 @@ public class GameModeSystemServer : ComponentSystem
                 continue;
             }
 
-            if (EntityManager.HasComponent<CharacterPredictedState>(controlledEntity))
+            if (EntityManager.HasComponent<HealthStateData>(controlledEntity))
             {
                 // Is character dead ?
-                var character = EntityManager.GetComponentObject<Character>(controlledEntity);
-                if (character.healthState.health == 0)
+                var healthState = EntityManager.GetComponentData<HealthStateData>(controlledEntity);
+                if (healthState.health == 0)
                 {
                     // Send kill msg
-                    if (character.healthState.deathTick == m_World.worldTime.tick)
+                    if (healthState.deathTick == m_World.worldTime.tick)
                     {
-                        var killerEntity = character.healthState.killedBy;
+                        var killerEntity = healthState.killedBy;
                         var killerIndex = FindPlayerControlling(ref playerStates, killerEntity);
                         PlayerState killerPlayer = null;
                         if (killerIndex != -1)
@@ -280,11 +282,11 @@ public class GameModeSystemServer : ComponentSystem
                     }
 
                     // Respawn dead players except if in ended mode
-                    if (m_EnableRespawning && (m_World.worldTime.tick - character.healthState.deathTick) *
+                    if (m_EnableRespawning && (m_World.worldTime.tick - healthState.deathTick) *
                         m_World.worldTime.tickInterval > respawnDelay.IntValue)
                     {
                         // Despawn current controlled entity. New entity will be created later
-                        if (EntityManager.HasComponent<CharacterPredictedState>(controlledEntity))
+                        if (EntityManager.HasComponent<Character>(controlledEntity))
                             CharacterDespawnRequest.Create(PostUpdateCommands, controlledEntity);
                         player.controlledEntity = Entity.Null;
                     }
@@ -300,7 +302,7 @@ public class GameModeSystemServer : ComponentSystem
 
         var heroTypeRegistry = m_ResourceSystem.GetResourceRegistry<HeroTypeRegistry>();
         var c = player.GetComponent<PlayerCharacterControl>();
-        c.requestedCharacterType = (c.characterType + 1) % heroTypeRegistry.entries.Length;
+        c.requestedCharacterType = (c.characterType + 1) % heroTypeRegistry.entries.Count;
 
         chatSystem.SendChatMessage(player.playerId, "Switched to: " + heroTypeRegistry.entries[c.requestedCharacterType].name);
     }

@@ -2,7 +2,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
-
+using System.Text.RegularExpressions;
 
 public class ChatPanel : MonoBehaviour
 {
@@ -17,7 +17,7 @@ public class ChatPanel : MonoBehaviour
     public GameObject content;
     public ChatLine lineTemplate;
     public ScrollRect scrollRect;
-    public InputField field;
+    public TMPro.TMP_InputField field;
     public Image[] backgroundImages;
 
     [NonSerialized] public KeyCode activationKey = KeyCode.Return;
@@ -29,7 +29,7 @@ public class ChatPanel : MonoBehaviour
         field.textComponent.enabled = false;
         m_MoveToEnd = true;
 
-        var submitEvent = new InputField.SubmitEvent();
+        var submitEvent = new TMPro.TMP_InputField.SubmitEvent();
         submitEvent.AddListener(OnEndEdit);
         field.onEndEdit = submitEvent;
 
@@ -125,6 +125,14 @@ public class ChatPanel : MonoBehaviour
 
     }
 
+    public void ClearMessages()
+    {
+        // Fade out all message lines
+        foreach (var l in m_Lines)
+            l.Hide();
+    }
+
+    Regex m_EmptyMessageRegex = new Regex(@"^/(\w+)\s+$"); // match 'empty' messages like e.g. "/all "
     void OnEndEdit(string value)
     {
         if (!Input.GetKey(KeyCode.Return) && !Input.GetKey(KeyCode.KeypadEnter))
@@ -134,7 +142,7 @@ public class ChatPanel : MonoBehaviour
 
         field.text = defaultPrefix;
         m_MoveToEnd = true;
-        if (string.IsNullOrEmpty(value))
+        if (string.IsNullOrEmpty(value) || m_EmptyMessageRegex.IsMatch(value))
             return;
 
         m_ChatLinesToSend.Add(value);
@@ -173,7 +181,10 @@ public class ChatPanel : MonoBehaviour
     void FadeBackgrounds(float alpha, float duration)
     {
         foreach (var image in backgroundImages)
-            image.CrossFadeAlpha(alpha, duration, false);
+        {
+            image.enabled = alpha > 0.0f;
+            //image.CrossFadeAlpha(alpha, duration, false);
+        }
     }
 
     bool m_IsOpen;

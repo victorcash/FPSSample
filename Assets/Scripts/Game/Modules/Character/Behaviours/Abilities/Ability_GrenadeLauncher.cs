@@ -4,8 +4,8 @@ using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 
-[RequireComponent(typeof(ReplicatedAbility))]
-public class Ability_GrenadeLauncher : MonoBehaviour
+[CreateAssetMenu(fileName = "Ability_GrenadeLauncher",menuName = "FPS Sample/Abilities/Ability_GrenadeLauncher")]
+public class Ability_GrenadeLauncher : CharBehaviorFactory
 {
     public enum Phase
     {
@@ -22,28 +22,18 @@ public class Ability_GrenadeLauncher : MonoBehaviour
     [Serializable]
     public struct Settings : IComponentData
     {
+        public UserCommand.Button activateButton;
+        
         public float activationDuration;        
         public float cooldownDuration;
-        public CharacterPredictedState.StateData.Action fireAction;
+        public CharacterPredictedData.Action fireAction;
         public float grenadeVelocity;
         public float grenadePitchAngle;
-        [NonSerialized] public unsafe fixed byte grenadePrefabGUID[16];
-        public void SetGrenadePrefabGuid(byte[] guid)
-        {
-            unsafe
-            {
-                fixed(byte* p = grenadePrefabGUID) {
-                    for (var i = 0; i < guid.Length; i++)
-                    {
-                        p[i] = guid[i];
-                    }
-                }
-            }
-        }
+        public WeakAssetReference assetGuid;
     }
 
 
-    public struct PredictedState : IPredictedData<PredictedState>, IComponentData
+    public struct PredictedState : IPredictedComponent<PredictedState>, IComponentData
     {
         public Phase phase;
         public int phaseStartTick;
@@ -54,15 +44,20 @@ public class Ability_GrenadeLauncher : MonoBehaviour
             this.phase = phase;
             this.phaseStartTick = tick;
         }
+        
+        public static IPredictedComponentSerializerFactory CreateSerializerFactory()
+        {
+            return new PredictedComponentSerializerFactory<PredictedState>();
+        }
 
-        public void Serialize(ref NetworkWriter writer, IEntityReferenceSerializer refSerialize)
+        public void Serialize(ref SerializeContext context, ref NetworkWriter writer)
         {
             writer.WriteInt32("phase", (int)phase);
             writer.WriteInt32("phaseStart", phaseStartTick);
             writer.WriteInt32("fireRequestedTick", fireRequestedTick);
         }
 
-        public void Deserialize(ref NetworkReader reader, IEntityReferenceSerializer refSerializer, int tick)
+        public void Deserialize(ref SerializeContext context, ref NetworkReader reader)
         {
             phase = (Phase)reader.ReadInt32();
             phaseStartTick = reader.ReadInt32();
@@ -77,84 +72,68 @@ public class Ability_GrenadeLauncher : MonoBehaviour
 #endif    
     }
     
-    public struct InterpolatedState : IInterpolatedData<InterpolatedState>, IComponentData
+    public struct InterpolatedState : IInterpolatedComponent<InterpolatedState>, IComponentData
     {
         public int fireTick;
         
-        public void Serialize(ref NetworkWriter writer, IEntityReferenceSerializer refSerializer)
+        public static IInterpolatedComponentSerializerFactory CreateSerializerFactory()
+        {
+            return new InterpolatedComponentSerializerFactory<InterpolatedState>();
+        }
+        
+        public void Serialize(ref SerializeContext context, ref NetworkWriter writer)
         {
             writer.WriteInt32("fireTick", fireTick);
         }
 
-        public void Deserialize(ref NetworkReader reader, IEntityReferenceSerializer refSerializer, int tick)
+        public void Deserialize(ref SerializeContext context, ref NetworkReader reader)
         {
             fireTick = reader.ReadInt32();
         }
 
-        public void Interpolate(ref InterpolatedState first, ref InterpolatedState last, float t)
+        public void Interpolate(ref SerializeContext context, ref InterpolatedState first, ref InterpolatedState last,
+            float t)
         {
             this = first;
         }
     }
-
+    
     public Settings settings;
-    public WeakAssetReference grenadePrefab;
-
-    private void OnEnable()
+    
+    public override Entity Create(EntityManager entityManager, List<Entity> entities)
     {
-        var gameObjectEntity = GetComponent<GameObjectEntity>();
-        var entityManager = gameObjectEntity.EntityManager;
-        var abilityEntity = gameObjectEntity.Entity;
-
-        // Default components
-        entityManager.AddComponentData(abilityEntity, new CharacterAbility());
-        entityManager.AddComponentData(abilityEntity, new AbilityControl());
-
-        // Ability components
-        
-        var guid = Guid.Parse(grenadePrefab.guid);
-        var byteArray = guid.ToByteArray();
-        GameDebug.Assert(byteArray.Length == 16,"Guid byte array length:{0}. SHould be 16", byteArray.Length);
-        settings.SetGrenadePrefabGuid(byteArray);
-        entityManager.AddComponentData(abilityEntity, settings);
-        entityManager.AddComponentData(abilityEntity, new LocalState());
-        entityManager.AddComponentData(abilityEntity, new PredictedState());
-        entityManager.AddComponentData(abilityEntity, new InterpolatedState());
-
-        
-        // Setup replicated ability
-        var replicatedAbility = entityManager.GetComponentObject<ReplicatedAbility>(abilityEntity);
-        replicatedAbility.predictedHandlers = new IPredictedDataHandler[2];
-        replicatedAbility.predictedHandlers[0] = new PredictedEntityHandler<AbilityControl>(entityManager, abilityEntity);
-        replicatedAbility.predictedHandlers[1] = new PredictedEntityHandler<PredictedState>(entityManager, abilityEntity);
-        replicatedAbility.interpolatedHandlers = new IInterpolatedDataHandler[1];
-        replicatedAbility.interpolatedHandlers[0] = new InterpolatedEntityHandler<InterpolatedState>(entityManager, abilityEntity);
+        var entity = CreateCharBehavior(entityManager);
+        entities.Add(entity);
+		
+        entityManager.AddComponentData(entity, settings);
+        entityManager.AddComponentData(entity, new LocalState());
+        entityManager.AddComponentData(entity, new PredictedState());
+        entityManager.AddComponentData(entity, new InterpolatedState());
+        return entity;
     }
+
 }
 
 
 [DisableAutoCreation]
-class GrenadeLauncher_RequestActive : BaseComponentDataSystem<CharacterAbility,AbilityControl, Ability_GrenadeLauncher.PredictedState>
+class GrenadeLauncher_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityControl,
+    Ability_GrenadeLauncher.PredictedState,Ability_GrenadeLauncher.Settings>
 {
     public GrenadeLauncher_RequestActive(GameWorld world) : base(world)
     {
         ExtraComponentRequirements = new ComponentType[] { typeof(ServerEntity) } ;
     }
 
-    protected override void Update(Entity entity, CharacterAbility charAbility, AbilityControl abilityCtrl, Ability_GrenadeLauncher.PredictedState predictedState)
+    protected override void Update(Entity entity, CharBehaviour charAbility, AbilityControl abilityCtrl, 
+        Ability_GrenadeLauncher.PredictedState predictedState, Ability_GrenadeLauncher.Settings settings)
     {
-        var command = EntityManager.GetComponentObject<UserCommandComponent>(charAbility.character).command;
-        var character = EntityManager.GetComponentObject<CharacterPredictedState>(charAbility.character);
-        
-        var isAlive = character.State.locoState != CharacterPredictedState.StateData.LocoState.Dead;
-        var fireRequested = command.secondaryFire && isAlive;
-
-        var isActive = predictedState.phase == Ability_GrenadeLauncher.Phase.Active;
-
-        abilityCtrl.requestsActive = !character.State.abilityActive && (isActive || fireRequested) ? 1 : 0;
-        
+        if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
+            return;
+		
+        var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
+        abilityCtrl.behaviorState = command.buttons.IsSet(settings.activateButton) ?  
+            AbilityControl.State.RequestActive : AbilityControl.State.Idle;
         EntityManager.SetComponentData(entity, abilityCtrl);			
-        EntityManager.SetComponentData(entity, predictedState);
     }
 }
 
@@ -167,21 +146,24 @@ class GrenadeLauncher_Update : BaseComponentDataSystem<AbilityControl,Ability_Gr
         ExtraComponentRequirements = new ComponentType[] { typeof(ServerEntity) } ;
     }
     
-    protected override void Update(Entity entity, AbilityControl abilityCtrl, Ability_GrenadeLauncher.PredictedState predictedState, Ability_GrenadeLauncher.Settings settings)
+    protected override void Update(Entity entity, AbilityControl abilityCtrl, Ability_GrenadeLauncher.PredictedState predictedState, Ability_GrenadeLauncher.Settings state)
     {
         var time = m_world.worldTime;
         
         switch (predictedState.phase)
         {
             case Ability_GrenadeLauncher.Phase.Idle:
-                if (abilityCtrl.activeAllowed == 1)
+                if (abilityCtrl.active == 1)
                 {
-                    var charAbility = EntityManager.GetComponentData<CharacterAbility>(entity);
-                    var charPredictedState = EntityManager.GetComponentObject<CharacterPredictedState>(charAbility.character);
+                    var charAbility = EntityManager.GetComponentData<CharBehaviour>(entity);
+                    var charPredictedState = EntityManager.GetComponentData<CharacterPredictedData>(charAbility.character);
                     var character = EntityManager.GetComponentObject<Character>(charAbility.character);
+                    
+                    abilityCtrl.behaviorState = AbilityControl.State.Active;
+                    
                     predictedState.SetPhase(Ability_GrenadeLauncher.Phase.Active, time.tick);
 
-                    charPredictedState.State.SetAction(settings.fireAction, time.tick);
+                    charPredictedState.SetAction(state.fireAction, time.tick);
 
                     // Only spawn once for each tick (so it does not fire again when re-predicting)
                     var localState = EntityManager.GetComponentData<Ability_GrenadeLauncher.LocalState>(entity);
@@ -190,55 +172,67 @@ class GrenadeLauncher_Update : BaseComponentDataSystem<AbilityControl,Ability_Gr
                         localState.lastFireTick = time.tick;
                         EntityManager.SetComponentData(entity, localState);
                         
-                        var eyePos = charPredictedState.State.position + Vector3.up*character.eyeHeight;
+                        var eyePos = charPredictedState.position + Vector3.up*character.eyeHeight;
                         
                         var interpolatedState = EntityManager.GetComponentData<Ability_GrenadeLauncher.InterpolatedState>(entity);
-                        var command = EntityManager.GetComponentObject<UserCommandComponent>(charAbility.character)
+                        var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character)
                             .command;
                         
                         var startDir = command.lookDir;
                         var right = math.cross(new float3(0, 1, 0),startDir);
-                        var pitchRot = quaternion.axisAngle(right,
-                            -math.radians(settings.grenadePitchAngle));
+                        var pitchRot = quaternion.AxisAngle(right,
+                            -math.radians(state.grenadePitchAngle));
                         startDir = math.mul(pitchRot, startDir);
                             
-                        var velocity = startDir*settings.grenadeVelocity;
+                        var velocity = startDir*state.grenadeVelocity;
 
-                        unsafe
-                        {
-                            GrenadeSpawnRequest.Create(PostUpdateCommands, settings.grenadePrefabGUID, eyePos,
-                                velocity, charAbility.character, charPredictedState.teamId);
-                        }
+                        GrenadeSpawnRequest.Create(PostUpdateCommands, state.assetGuid, eyePos,
+                            velocity, charAbility.character, character.teamId);
 
                         interpolatedState.fireTick = time.tick;
                         EntityManager.SetComponentData(entity, interpolatedState);
                     }
+                    
+                    EntityManager.SetComponentData(entity, abilityCtrl);
+                    EntityManager.SetComponentData(entity, predictedState);
+                    EntityManager.SetComponentData(charAbility.character, charPredictedState);
                 }
                 break;
             case Ability_GrenadeLauncher.Phase.Active:
             {
                 var phaseDuration = time.DurationSinceTick(predictedState.phaseStartTick);
-                if (phaseDuration > settings.activationDuration)
+                if (phaseDuration > state.activationDuration)
                 {
-                    var charAbility = EntityManager.GetComponentData<CharacterAbility>(entity);
-                    var character = EntityManager.GetComponentObject<CharacterPredictedState>(charAbility.character);
+                    var charAbility = EntityManager.GetComponentData<CharBehaviour>(entity);
+                    var charPredictedState = EntityManager.GetComponentData<CharacterPredictedData>(charAbility.character);
+                    
+                    abilityCtrl.behaviorState = AbilityControl.State.Cooldown;
                     
                     predictedState.SetPhase(Ability_GrenadeLauncher.Phase.Cooldown, time.tick);
-                    character.State.SetAction(CharacterPredictedState.StateData.Action.None, time.tick);
+                    
+                    charPredictedState.SetAction(CharacterPredictedData.Action.None, time.tick);
+                    
+                    EntityManager.SetComponentData(entity, abilityCtrl);
+                    EntityManager.SetComponentData(entity, predictedState);
+                    EntityManager.SetComponentData(charAbility.character, charPredictedState);
                 }
                 break;
             }
             case Ability_GrenadeLauncher.Phase.Cooldown:
             {
                 var phaseDuration = time.DurationSinceTick(predictedState.phaseStartTick);
-                if (phaseDuration > settings.cooldownDuration)
+                if (phaseDuration > state.cooldownDuration)
                 {
+                    abilityCtrl.behaviorState = AbilityControl.State.Idle;
+
                     predictedState.SetPhase(Ability_GrenadeLauncher.Phase.Idle, time.tick);
+                    
+                    EntityManager.SetComponentData(entity, abilityCtrl);
+                    EntityManager.SetComponentData(entity, predictedState);
                 }
                 break;
             }
         }
 
-        EntityManager.SetComponentData(entity, predictedState);
     }
 }

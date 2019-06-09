@@ -3,10 +3,19 @@ using System.Collections.Generic;
 using Object = UnityEngine.Object;
 
 using Unity.Entities;
+using UnityEditor;
 using UnityEngine.Profiling;
+
 
 public struct DespawningEntity : IComponentData
 {
+}
+
+
+[InternalBufferCapacity(16)]
+public struct EntityGroupChildren : IBufferElementData
+{
+    public Entity entity;
 }
 
 [DisableAutoCreation]
@@ -14,9 +23,9 @@ public class DestroyDespawning : ComponentSystem
 {
     ComponentGroup Group;
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnCreateManager()
     {
-        base.OnCreateManager(capacity);
+        base.OnCreateManager();
         Group = GetComponentGroup(typeof(DespawningEntity));
     }
     
@@ -29,7 +38,6 @@ public class DestroyDespawning : ComponentSystem
         }
     }
 }
-
 
 public class GameWorld
 {
@@ -58,20 +66,19 @@ public class GameWorld
     
     public GameWorld(string name = "world")
     {
+        GameDebug.Log("GameWorld " + name + " initializing");
+        
         if (gameobjectHierarchy.IntValue == 1)
         {
             m_sceneRoot = new GameObject(name);
             GameObject.DontDestroyOnLoad(m_sceneRoot);
         }
-
-        m_ECSWorld = new World(name);
-        World.Active = m_ECSWorld;
+        
+        GameDebug.Assert(World.Active != null,"There is no active world");
+        m_ECSWorld = World.Active; 
+        
         m_EntityManager = m_ECSWorld.GetOrCreateManager<EntityManager>();
-
-        //InjectionHookSupport.RegisterHook(new GameObjectArrayInjectionHook());
-        //InjectionHookSupport.RegisterHook(new TransformAccessArrayInjectionHook());
-        InjectionHookSupport.RegisterHook(new ComponentArrayInjectionHook());
-
+        
         GameDebug.Assert(m_EntityManager.IsCreated);
 
         worldTime.tickRate = 60;
@@ -85,27 +92,27 @@ public class GameWorld
 
     public void Shutdown()
     {
+        GameDebug.Log("GameWorld " + m_ECSWorld.Name + " shutting down");
+        
         foreach (var entity in m_dynamicEntities)
         {
             if (m_DespawnRequests.Contains(entity))
                 continue;
 
-#if UNITY_EDITOR
+//#if UNITY_EDITOR
             if (entity == null)
                 continue;
 
             var gameObjectEntity = entity.GetComponent<GameObjectEntity>();
             if (gameObjectEntity != null && !m_EntityManager.Exists(gameObjectEntity.Entity))
                 continue;
-#endif            
+//#endif            
             
             RequestDespawn(entity);
         }
         ProcessDespawns();
-        m_ECSWorld.DestroyManager(m_destroyDespawningSystem);
+
         s_Worlds.Remove(this);
-        m_ECSWorld.Dispose();
-        m_ECSWorld = null;
 
         GameObject.Destroy(m_sceneRoot);
     }
@@ -117,14 +124,13 @@ public class GameWorld
         sceneEntities.Sort((a, b) => ByteArrayComp.instance.Compare(a.netID, b.netID));
         for (int i = 0; i < sceneEntities.Count; i++)
         {
-            GameDebug.Assert(sceneEntities[i].GetComponent<SceneEntity>() != null, "Entity {0} has replciated component but does not have scene entity",sceneEntities[i]);
-            sceneEntities[i].id = i;
+            var gameObjectEntity = sceneEntities[i].GetComponent<GameObjectEntity>();
+
+            var replicatedEntityData = gameObjectEntity.EntityManager.GetComponentData<ReplicatedEntityData>(gameObjectEntity.Entity);
+            replicatedEntityData.id = i;
+            gameObjectEntity.EntityManager.SetComponentData(gameObjectEntity.Entity,replicatedEntityData);
         }
         m_sceneEntities.AddRange(sceneEntities);
-
-        // Then all scene entities (replicated or not) are registrered in ECS
-        foreach (var gameEntity in Object.FindObjectsOfType<SceneEntity>())
-            RegisterInternal(gameEntity.gameObject, false);
     }
     
     public EntityManager GetEntityManager()    
@@ -213,6 +219,49 @@ public class GameWorld
         m_DespawnRequests.Add(entity);
     }
 
+    public void RequestDespawn(Entity entity)
+    {
+        m_EntityManager.AddComponent(entity, typeof(DespawningEntity));
+        m_DespawnEntityRequests.Add(entity);
+        
+        if (m_EntityManager.HasComponent<EntityGroupChildren>(entity))
+        {
+            // Copy buffer as we dont have EntityCommandBuffer to perform changes            
+            var buffer = m_EntityManager.GetBuffer<EntityGroupChildren>(entity);
+            var entities = new Entity[buffer.Length];
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                entities[i] = buffer[i].entity;
+            }
+            
+            for (int i = 0; i < entities.Length; i++)
+            {
+                m_EntityManager.AddComponent(entities[i], typeof(DespawningEntity));
+                m_DespawnEntityRequests.Add(entities[i]);
+            }
+        }
+    }
+    
+    public void RequestDespawn(EntityCommandBuffer commandBuffer, Entity entity)
+    {
+        if (m_DespawnEntityRequests.Contains(entity))
+        {
+            GameDebug.Assert(false, "Trying to request depawn of same gameobject({0}) multiple times",entity);
+            return;
+        }
+        commandBuffer.AddComponent(entity, new DespawningEntity());
+        m_DespawnEntityRequests.Add(entity);
+
+        if (m_EntityManager.HasComponent<EntityGroupChildren>(entity))
+        {
+            var buffer = m_EntityManager.GetBuffer<EntityGroupChildren>(entity);
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                commandBuffer.AddComponent(buffer[i].entity, new DespawningEntity());
+                m_DespawnEntityRequests.Add(buffer[i].entity);
+            }
+        }
+    }
     
     public void ProcessDespawns()
     {
@@ -222,6 +271,11 @@ public class GameWorld
             Object.Destroy(gameObject);
         }
 
+        foreach (var entity in m_DespawnEntityRequests)
+        {
+            m_EntityManager.DestroyEntity(entity);
+        }
+        m_DespawnEntityRequests.Clear();
         m_DespawnRequests.Clear();
 
         m_destroyDespawningSystem.Update();
@@ -250,6 +304,7 @@ public class GameWorld
     List<GameObject> m_dynamicEntities = new List<GameObject>();
     List<ReplicatedEntity> m_sceneEntities = new List<ReplicatedEntity>();
     List<GameObject> m_DespawnRequests = new List<GameObject>(32);
+    List<Entity> m_DespawnEntityRequests = new List<Entity>(32);
 
     [ConfigVar(Name = "gameobjecthierarchy", Description = "Should gameobject be organized in a gameobject hierarchy", DefaultValue = "0")]
     static ConfigVar gameobjectHierarchy;

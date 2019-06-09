@@ -34,22 +34,16 @@ public abstract class CharacterModuleShared
     protected SystemCollection m_HandleSpawnSystems = new SystemCollection();
     protected SystemCollection m_HandleDespawnSystems = new SystemCollection();
     
+    protected SystemCollection m_AbilityRequestUpdateSystems = new SystemCollection();
     protected SystemCollection m_MovementStartSystems = new SystemCollection();
     protected SystemCollection m_MovementResolveSystems = new SystemCollection();
     protected SystemCollection m_AbilityStartSystems = new SystemCollection();
     protected SystemCollection m_AbilityResolveSystems = new SystemCollection();
 
-#if UNITY_EDITOR    
-    readonly StoreStateHistory m_storeStateHistory;
-#endif
     
     public CharacterModuleShared(GameWorld world)
     {
         m_world = world;
-       
-#if UNITY_EDITOR    
-        m_storeStateHistory = m_world.GetECSWorld().CreateManager<StoreStateHistory>(m_world);
-#endif        
     }
 
     public virtual void Shutdown()
@@ -57,14 +51,11 @@ public abstract class CharacterModuleShared
         m_ControlledEntityChangedSystems.Shutdown(m_world.GetECSWorld());
         m_HandleSpawnSystems.Shutdown(m_world.GetECSWorld());
         m_HandleDespawnSystems.Shutdown(m_world.GetECSWorld());
+        m_AbilityRequestUpdateSystems.Shutdown(m_world.GetECSWorld());
         m_MovementStartSystems.Shutdown(m_world.GetECSWorld());
         m_MovementResolveSystems.Shutdown(m_world.GetECSWorld());
         m_AbilityStartSystems.Shutdown(m_world.GetECSWorld());
         m_AbilityResolveSystems.Shutdown(m_world.GetECSWorld());
-        
-#if UNITY_EDITOR 
-        m_world.GetECSWorld().DestroyManager(m_storeStateHistory);
-#endif
     }
     
     public void HandleSpawns()
@@ -74,13 +65,19 @@ public abstract class CharacterModuleShared
     
     public void HandleDepawns()
     {
-        m_HandleSpawnSystems.Update();
+        m_HandleDespawnSystems.Update();
     }
     
     public void HandleControlledEntityChanged()
     {
         m_ControlledEntityChangedSystems.Update();
     }
+
+    public void AbilityRequestUpdate()
+    {
+        m_AbilityRequestUpdateSystems.Update();
+    }
+
     
     public void MovementStart()
     {
@@ -100,10 +97,5 @@ public abstract class CharacterModuleShared
     public void AbilityResolve()
     {
         m_AbilityResolveSystems.Update();
-        
-        
-#if UNITY_EDITOR         
-        m_storeStateHistory.Update();
-#endif        
     }
 }

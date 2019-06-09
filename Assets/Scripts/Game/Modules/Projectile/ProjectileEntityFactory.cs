@@ -1,30 +1,34 @@
 ﻿using Unity.Entities;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [CreateAssetMenu(fileName = "ProjectileEntityFactory",menuName = "FPS Sample/Projectile/ProjectileEntityFactory")]
-public class ProjectileEntityFactory : ReplicatedEntityFactor
+public class ProjectileEntityFactory : ReplicatedEntityFactory
 {
-    public override Entity Create(EntityManager entityManager)
+    public override Entity Create(EntityManager entityManager, BundledResourceManager resourceManager, 
+        GameWorld world)
     {
-        var entity = entityManager.CreateEntity(typeof(ReplicatedDataEntity), typeof(ProjectileData) );
+        var entity = entityManager.CreateEntity(typeof(ReplicatedEntityData), 
+            typeof(ProjectileData) );
 
-        // Add uninitialized replicated entity
-        var repData = new ReplicatedDataEntity
-        {
-            id = -1,
-            typeId = typeId,
-        };
+        var repData = new ReplicatedEntityData( guid);
+        
         entityManager.SetComponentData(entity, repData);
 
 //        GameDebug.Log("ProjectileEntityFactory.Crate entity:" + entity + " typeId:" + repData.typeId + " id:" + repData.id);
 
         return entity;
     }
-    
-    public override INetworkSerializable[] CreateSerializables(EntityManager entityManager, Entity entity)
-    {
-        var serializableArray = new INetworkSerializable[1];
-        serializableArray[0] = new SerializedComponentDataHandler<ProjectileData>(entityManager, entity); 
-        return serializableArray;
-    }
 }
+
+
+#if UNITY_EDITOR
+[CustomEditor(typeof(ProjectileEntityFactory))]
+public class ProjectileEntityFactoryEditor : ReplicatedEntityFactoryEditor<ReplicatedEntityFactory>
+{
+}
+
+
+#endif

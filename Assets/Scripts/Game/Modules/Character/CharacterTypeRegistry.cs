@@ -4,71 +4,42 @@ using UnityEngine;
 using UnityEditor;
 #endif
 
+// TODO (mogensh) currently only real purpose of this registry is to hand guids to bundlebuilding (same goes for itemregistry) Remove when we have addressable assets?
 [CreateAssetMenu(menuName = "FPS Sample/Character/TypeRegistry", fileName = "CharacterTypeRegistry")]
 public class CharacterTypeRegistry : RegistryBase
 {
-    public CharacterTypeDefinition[] entries;
-
-    public CharacterTypeDefinition GetEntryById(uint registryId)
-    {
-        var index = FindIndexByRigistryId(registryId);
-        return entries[index];
-    }
+    public List<CharacterTypeDefinition> entries = new List<CharacterTypeDefinition>();
     
-    public int FindIndexByRigistryId(uint registryId)
-    {
-        return (int)registryId - 1;
-    }
-   
-    
-    public int GetIndexByClientGUID(string guid)
-    {
-        for (var i = 0; i < entries.Length; i++)
-        {
-            if (entries[i].prefabClient.guid == guid)
-                return i;
-        }
-
-        return -1;
-    }
-    
-
 #if UNITY_EDITOR
-    public override void UpdateRegistry(bool dry)
+    
+    public override void PrepareForBuild()
     {
-        var newEntries = new List<CharacterTypeDefinition>();
-        var guids = AssetDatabase.FindAssets("t:" + typeof(CharacterTypeDefinition).Name);
+        Debug.Log("ReplicatedEntityRegistry"); 
+
+        entries.Clear();
+        var guids = AssetDatabase.FindAssets("t:CharacterTypeDefinition");
         foreach (var guid in guids)
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (dry) Debug.Log("  Adding " + path);
-            var asset = AssetDatabase.LoadAssetAtPath(path, typeof(CharacterTypeDefinition));
-            var definition = asset as CharacterTypeDefinition;
-
-            newEntries.Add(definition);
-
-            // Update registry ID
-            var registryId = (uint)newEntries.Count;
-            if (definition.registryId != registryId)
-            {
-                definition.registryId = registryId;
-                EditorUtility.SetDirty(definition);
-            } 
+            var definition = AssetDatabase.LoadAssetAtPath<CharacterTypeDefinition>(path);
+            Debug.Log("   Adding definition:" + definition);
+            entries.Add(definition);
         }
-        if(!dry)
-            entries = newEntries.ToArray();
+        
         EditorUtility.SetDirty(this);
     }
+
+    
     public override void GetSingleAssetGUIDs(List<string> guids, bool serverBuild)
     {
         foreach (var setup in entries)
         {
-            if (serverBuild && setup.prefabServer.guid != "")
-                guids.Add(setup.prefabServer.guid);
-            if (!serverBuild && setup.prefabClient.guid != "")
-                guids.Add(setup.prefabClient.guid);
-            if (!serverBuild && setup.prefab1P.guid != "")
-                guids.Add(setup.prefab1P.guid);
+            if (serverBuild && setup.prefabServer.IsSet())
+                guids.Add(setup.prefabServer.GetGuidStr());
+            if (!serverBuild && setup.prefabClient.IsSet())
+                guids.Add(setup.prefabClient.GetGuidStr());
+            if (!serverBuild && setup.prefab1P.IsSet())
+                guids.Add(setup.prefab1P.GetGuidStr());
         }
     }
 #endif
